@@ -5,23 +5,61 @@
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6.svg?logo=windows&logoColor=white)](https://microsoft.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
-**VoiceTyper** is an ultra-low-latency, client-server push-to-talk voice typing system. 
+**VoiceTyper** is an ultra-low-latency, 100% private, self-hosted push-to-talk voice typing system designed for dual-setup workflows (Windows PC + Apple Silicon Mac).
 
-It lets you hold a hotkey (default: `Pause`), speak into your microphone, release the key, and instantly have your speech transcribed and pasted into **any active input field** across Windows (Notion, Telegram, VS Code, Word, web browser, etc.) using hardware-accelerated OpenAI Whisper inference running on an Apple Silicon (Mac mini / MacBook M1/M2/M3/M4) local server.
+Hold your push-to-talk key (default: `Pause`), speak into your microphone, release the key, and have your speech transcribed and pasted into **any active input field** across Windows (Telegram, Notion, VS Code, Word, web browser, etc.) within **~150–200ms**.
 
 ---
 
-## ✨ Features
+## 💡 Why VoiceTyper? (Motivation)
+
+Like many developers and knowledge workers, I work on a powerful **Windows PC** workstation, but I also have an **Apple Silicon Mac (Mac mini M1)** on the same local network. 
+
+I loved the effortless experience of tools like **Wispr Flow** and **Willow Voice**, but I ran into several major drawbacks:
+1. **Expensive Subscriptions:** Commercial dictation tools often charge $15–$30/month.
+2. **Privacy Concerns:** Every word you dictate gets sent over the internet to third-party cloud servers.
+3. **PC Resource Overhead:** Running large Whisper models locally on a Windows gaming or work PC can hog GPU VRAM and cause micro-stutters during heavy tasks.
+
+**VoiceTyper was built to solve this exact problem:**  
+It offloads the heavy neural speech recognition to your idle Mac mini's Apple Silicon unified memory (via Apple MLX on Metal GPU) over your ultra-fast local network. You get **instant, air-gapped, zero-cost push-to-talk dictation everywhere in Windows** with **<200ms latency**.
+
+---
+
+### 📊 Comparison
+
+| Feature | 🎙️ VoiceTyper | 🌐 Wispr Flow / Willow Voice | 🐢 Local Whisper on PC (CPU) |
+|---|:---:|:---:|:---:|
+| **Cost** | **100% Free & Open Source** | $15–$30 / month | Free |
+| **Privacy** | **100% Local LAN (Air-Gapped)** | Cloud servers | Local |
+| **Latency** | **~150–200ms (Metal GPU)** | ~500–1500ms (Internet roundtrip) | 1.5–4.0s (CPU lag) |
+| **PC Performance Impact** | **0% (Offloaded to Mac)** | 0% (Cloud) | High CPU/GPU load |
+| **Cold-Start Lag** | **0 ms (Pre-warmed in VRAM)** | Varies | 3–5 seconds |
+| **Custom Vocabulary (`initial_prompt`)** | **Yes (Full custom control)** | Limited | Depends on implementation |
+
+---
+
+## 🎨 Note from the Author (The "Vibe Coder" Disclaimer)
+
+> **👋 Hey there!**  
+> I am not a 20-year veteran C++/systems engineer — I am a passionate builder and **"vibe coder"** who created VoiceTyper to scratch my own daily itch and solve a real workflow bottleneck between my Windows PC and Mac mini M1.
+>
+> The codebase is built with modern AI-assisted engineering: it is pragmatic, clean, thoroughly tested in real-world daily use, and designed to **just work**. 
+>
+> If you find a bug, have an optimization idea, or want to add a feature — please be kind! Pull Requests, code reviews, and constructive feedback are warmly welcomed and appreciated. Let's make voice typing accessible to everyone together! ❤️
+
+---
+
+## ✨ Key Features
 
 - **⚡ Ultra-Low End-to-End Latency (<200ms):**
-  - **Apple MLX Metal GPU Engine:** Model inference runs directly on Apple Silicon unified memory.
+  - **Apple MLX Metal GPU Engine:** Runs quantized and turbo Whisper models (`large-v3-turbo`) directly on Apple Silicon unified memory.
   - **Server Warm-Up:** Pre-warms model weights in VRAM and compiles Metal computational shaders on daemon startup (**0ms cold start**).
   - **Raw PCM Streaming:** Sends raw `float32 PCM` audio directly in the HTTP body via `/transcribe_raw` without WAV container encoding/decoding overhead.
   - **HTTP Keep-Alive Connection Pool:** Eliminates per-request TCP three-way handshakes.
   - **Continuous Audio Capture:** Eliminates device re-initialization and PortAudio driver overhead.
   - **Atomic Win32 Paste:** Instantly emulates `Ctrl+V` using Win32 API without artificial delays.
-- **🎯 Custom Vocabulary Biasing (`initial_prompt`):** Guide Whisper to accurately transcribe specific names, homophones, dialects, and technical terminology.
-- **🖥️ Silent Windows Background Mode & System Tray:** Discreet tray icon showing real-time status (Ready, Recording, Processing, Offline) with autostart toggle.
+- **🎯 Custom Vocabulary Biasing (`initial_prompt`):** Guide Whisper to accurately transcribe specific names, homophones, dialects, and technical terminology (e.g. specialized regional words).
+- **🖥️ Silent Windows Background Mode & System Tray:** Discreet tray icon with automatic live heartbeat polling showing real-time status (Ready, Recording, Processing, Offline) and autostart toggle.
 - **🍎 macOS LaunchAgent Daemon:** Runs as an automatic background service on macOS with auto-restart on reboot.
 
 ---
