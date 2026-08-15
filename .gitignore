@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+hermes-agent/
+
+# Audio & Log Artifacts
+*.wav
+*.mp3
+*.ogg
+*.log
+voice_typer.log
+whisper_server.log
+last_recording.wav
+last_recording_normalized.wav
+recognized_user_text.txt
+
+# IDEs & OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
