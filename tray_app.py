@@ -11,7 +11,7 @@ APP_REG_NAME = "VoiceTyper"
 
 
 def is_autostart_enabled() -> bool:
-    """Проверяет, добавлен ли скрипт в автозагрузку реестра Windows."""
+    """Checks whether autostart is enabled in Windows registry."""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ) as key:
             winreg.QueryValueEx(key, APP_REG_NAME)
@@ -23,13 +23,18 @@ def is_autostart_enabled() -> bool:
 
 
 def set_autostart(enable: bool) -> bool:
-    """Включает или отключает автозапуск приложения."""
+    """Toggles application autostart in Windows registry."""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
             if enable:
-                script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "main.py"))
-                python_exe = sys.executable.replace("python.exe", "pythonw.exe")
-                cmd = f'"{python_exe}" "{script_path}"'
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                vbs_path = os.path.join(base_dir, "VoiceTyper.vbs")
+                if os.path.exists(vbs_path):
+                    cmd = f'wscript.exe "{vbs_path}"'
+                else:
+                    script_path = os.path.join(base_dir, "main.py")
+                    python_exe = sys.executable.replace("python.exe", "pythonw.exe")
+                    cmd = f'"{python_exe}" "{script_path}"'
                 winreg.SetValueEx(key, APP_REG_NAME, 0, winreg.REG_SZ, cmd)
             else:
                 try:
@@ -38,25 +43,24 @@ def set_autostart(enable: bool) -> bool:
                     pass
             return True
     except Exception as e:
-        print(f"[TRAY] Ошибка изменения автозапуска: {e}")
+        print(f"[TRAY] Error toggling autostart: {e}")
         return False
 
 
 def create_state_icon(color_name: str = "green", size: int = 64) -> Image.Image:
-    """Генерирует иконку состояния с гладким кругом."""
+    """Generates a clean status circle icon for system tray."""
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     dc = ImageDraw.Draw(image)
 
     colors = {
         "green": (46, 204, 113, 255),      # Ready
-        "red": (231, 76, 60, 255),        # Recording (Hold active)
+        "red": (231, 76, 60, 255),        # Recording (Key held)
         "yellow": (241, 196, 15, 255),    # Processing
         "gray": (149, 165, 166, 255)      # Offline / Error
     }
     fill_color = colors.get(color_name, colors["green"])
     margin = 4
 
-    # Рисуем круг с белым аккуратным контуром
     dc.ellipse(
         [margin, margin, size - margin, size - margin],
         fill=fill_color,
@@ -71,7 +75,7 @@ class TrayApp:
         self,
         server_ip: str,
         server_port: int,
-        hotkey_name: str = "INSERT",
+        hotkey_name: str = "PAUSE",
         on_exit_callback: Optional[Callable[[], None]] = None
     ):
         self.server_ip = server_ip
@@ -102,30 +106,30 @@ class TrayApp:
             icon.stop()
 
         return pystray.Menu(
-            pystray.MenuItem(f"Voice Typer [Кнопка: {self.hotkey_name}]", None, enabled=False),
-            pystray.MenuItem(f"Сервер: {self.server_ip}:{self.server_port}", None, enabled=False),
+            pystray.MenuItem(f"Voice Typer [Key: {self.hotkey_name}]", None, enabled=False),
+            pystray.MenuItem(f"Server: {self.server_ip}:{self.server_port}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
-                "Автозапуск при старте Windows",
+                "Start with Windows",
                 on_toggle_autostart,
                 checked=lambda item: is_autostart_enabled()
             ),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Выход", on_exit)
+            pystray.MenuItem("Exit", on_exit)
         )
 
     def set_state(self, state: str) -> None:
-        """Обновляет иконку и подсказку в трее."""
+        """Updates tray icon color and tooltip."""
         with self._lock:
             if state not in self.icons:
                 state = "ready"
             self.current_state = state
 
             tooltips = {
-                "ready": f"Voice Typer: Готов к записи (Зажмите {self.hotkey_name})",
-                "recording": "Voice Typer: Идет запись...",
-                "processing": "Voice Typer: Обработка и вставка текста...",
-                "offline": f"Voice Typer: Сервер {self.server_ip}:{self.server_port} недоступен"
+                "ready": f"Voice Typer: Ready (Hold {self.hotkey_name})",
+                "recording": "Voice Typer: Recording audio...",
+                "processing": "Voice Typer: Transcribing & inserting text...",
+                "offline": f"Voice Typer: Server {self.server_ip}:{self.server_port} offline"
             }
 
             if self.icon:
@@ -133,16 +137,16 @@ class TrayApp:
                 self.icon.title = tooltips.get(state, "Voice Typer")
 
     def run(self) -> None:
-        """Запускает иконку трея (блокирующий вызов)."""
+        """Runs the system tray icon loop."""
         self.icon = pystray.Icon(
             name="VoiceTyper",
             icon=self.icons["offline"],
-            title="Voice Typer: Запуск...",
+            title="Voice Typer: Starting...",
             menu=self._build_menu()
         )
         self.icon.run()
 
     def stop(self) -> None:
-        """Останавливает трей."""
+        """Stops tray icon."""
         if self.icon:
             self.icon.stop()

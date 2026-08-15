@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Apple Silicon (MLX Metal GPU) Whisper Server для Mac mini M1
-=============================================================
-Высокопроизводительный сервер транскрипции реального времени:
-- Инференс на Apple Metal GPU через MLX
-- Предварительный прогрев (warm-up) модели при старте демона (0 мс холодный старт)
-- Поддержка initial_prompt для точного распознавания словарного запаса (Словения, словенский и т.д.)
-- Поддержка мгновенного сырого бинарного PCM потока (/transcribe_raw)
-- Обратная совместимость с WAV multipart/form-data (/transcribe)
+Apple Silicon (MLX Metal GPU) Whisper Server
+============================================
+Ultra-low latency Whisper speech-to-text server optimized for Apple Silicon (M1/M2/M3/M4):
+- Hardware accelerated inference via Apple MLX on Metal GPU
+- Warm-up upon server startup to eliminate cold-start latency (0ms cold start)
+- Support for initial_prompt custom vocabulary biasing
+- Direct raw float32 PCM binary streaming (/transcribe_raw)
+- Backward-compatible standard WAV multipart upload (/transcribe)
 """
 
 import io
@@ -26,10 +26,10 @@ from fastapi import FastAPI, File, Request, Response, UploadFile
 try:
     import mlx_whisper
     USE_MLX = True
-    print("[SERVER] Apple Silicon MLX GPU (Metal) доступен!")
+    print("[SERVER] Apple Silicon MLX GPU (Metal) engine available!")
 except ImportError:
     USE_MLX = False
-    print("[SERVER ВНИМАНИЕ] mlx-whisper не найден, используется CPU fallback.")
+    print("[SERVER WARNING] mlx-whisper not found, falling back to CPU.")
     try:
         from faster_whisper import WhisperModel
     except ImportError:
@@ -57,7 +57,7 @@ def run_mlx_inference(
     language: str = "ru",
     initial_prompt: Optional[str] = None
 ) -> str:
-    """Выполняет инференс на Apple Metal GPU с поддержкой initial_prompt и оптимизированных флагов."""
+    """Executes inference on Apple Metal GPU with optimized greedy decoding flags."""
     repo = MLX_MODELS.get(model_key.lower(), DEFAULT_MODEL_REPO)
 
     kwargs = {
@@ -78,22 +78,22 @@ def run_mlx_inference(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Жизненный цикл приложения: предпрогрев модели в Metal VRAM при старте."""
+    """Application lifespan manager: pre-warms model in Metal VRAM at startup."""
     print("==========================================================")
-    print(" 🚀 Запуск Apple Silicon Whisper Server (MLX Metal GPU)...")
-    print(f" Модель по умолчанию: {DEFAULT_MODEL_REPO}")
-    print(" Прогрев модели (Warm-up) в памяти Metal GPU...")
+    print(" 🚀 Starting Apple Silicon Whisper Server (MLX Metal GPU)...")
+    print(f" Default Model: {DEFAULT_MODEL_REPO}")
+    print(" Pre-warming model in Metal GPU memory...")
     t0 = time.time()
     try:
         dummy_audio = np.zeros(8000, dtype=np.float32)
         run_mlx_inference(dummy_audio, model_key="large-v3-turbo", language="ru")
         warmup_time = time.time() - t0
-        print(f" 🔥 Прогрев завершен за {warmup_time:.2f}с! Сервер готов к мгновенным запросам.")
+        print(f" 🔥 Model pre-warmed in {warmup_time:.2f}s! Ready for instant requests.")
     except Exception as e:
-        print(f" [ВНИМАНИЕ] Ошибка во время прогрева: {e}")
+        print(f" [WARNING] Pre-warming error: {e}")
     print("==========================================================")
     yield
-    print("[SERVER] Остановка сервера...")
+    print("[SERVER] Shutting down server...")
 
 
 app = FastAPI(title="Apple Silicon Whisper Server", lifespan=lifespan)
@@ -116,7 +116,7 @@ async def transcribe_raw(
     dtype: str = "float32",
     initial_prompt: Optional[str] = None
 ):
-    """Сверхбыстрый эндпоинт: принимает сырые бинарные байты PCM напрямую в body."""
+    """Ultra-fast endpoint: accepts raw float32/int16 PCM bytes directly in body (0ms parsing overhead)."""
     t0 = time.time()
     raw_body = await request.body()
     if not raw_body:
@@ -138,7 +138,7 @@ async def transcribe_raw(
     calc_time = time.time() - t0
 
     prompt_info = f" [Prompt: {initial_prompt[:30]}...]" if initial_prompt else ""
-    print(f"[RAW INFERENCE] {dur_sec:.2f}с аудио обработано за {calc_time:.3f}с{prompt_info} -> \"{text}\"")
+    print(f"[RAW INFERENCE] {dur_sec:.2f}s audio processed in {calc_time:.3f}s{prompt_info} -> \"{text}\"")
     return {
         "text": text,
         "calc_time_sec": round(calc_time, 3),
@@ -153,7 +153,7 @@ async def transcribe_http(
     language: str = "ru",
     initial_prompt: Optional[str] = None
 ):
-    """Классический эндпоинт для WAV файлов (обратная совместимость)."""
+    """Standard WAV multipart upload endpoint (backward compatibility)."""
     t0 = time.time()
     contents = await file.read()
 
@@ -170,7 +170,7 @@ async def transcribe_http(
     )
     calc_time = time.time() - t0
 
-    print(f"[WAV INFERENCE] {dur_sec:.2f}с аудио обработано за {calc_time:.3f}с -> \"{text}\"")
+    print(f"[WAV INFERENCE] {dur_sec:.2f}s audio processed in {calc_time:.3f}s -> \"{text}\"")
     return {
         "text": text,
         "calc_time_sec": round(calc_time, 3),

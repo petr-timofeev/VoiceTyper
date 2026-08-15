@@ -6,7 +6,7 @@ import pyperclip
 
 
 def send_ctrl_v() -> None:
-    """Надёжно и быстро эмулирует нажатие Ctrl+V."""
+    """Emulates Ctrl+V keystroke reliably and quickly."""
     try:
         keyboard.send("ctrl+v")
     except Exception:
@@ -22,13 +22,13 @@ def send_ctrl_v() -> None:
 
 
 def paste_via_clipboard(text: str) -> None:
-    """Вставляет текст через подмену буфера обмена и моментальный Ctrl+V."""
+    """Inserts text by temporarily modifying clipboard and triggering instant Ctrl+V."""
     if not text:
         return
 
     text_to_insert = text.strip() + " "
 
-    # Сохраняем предыдущий буфер
+    # Save previous clipboard content
     old_clipboard = ""
     try:
         old_clipboard = pyperclip.paste()
@@ -36,20 +36,17 @@ def paste_via_clipboard(text: str) -> None:
         pass
 
     try:
-        # Копируем текст в буфер
         pyperclip.copy(text_to_insert)
-        time.sleep(0.01)  # 10мс синхронизация буфера с Windows
-
-        # Эмуляция вставки
+        time.sleep(0.01)  # 10ms clipboard sync buffer
         send_ctrl_v()
     except Exception as e:
-        print(f"[INSERTER] Ошибка вставки через буфер: {e}")
+        print(f"[INSERTER] Error during clipboard paste: {e}")
         try:
             keyboard.write(text_to_insert)
         except Exception:
             pass
 
-    # Восстанавливаем буфер обмена в фоне
+    # Restore previous clipboard in background
     def _restore_clipboard():
         time.sleep(0.6)
         try:
@@ -61,23 +58,23 @@ def paste_via_clipboard(text: str) -> None:
 
 
 def paste_via_typing(text: str) -> None:
-    """Вставляет текст посимвольно через keyboard.write."""
+    """Inserts text character-by-character via keyboard.write."""
     if not text:
         return
     text_to_insert = text.strip() + " "
     try:
         keyboard.write(text_to_insert)
     except Exception as e:
-        print(f"[INSERTER] Ошибка посимвольного ввода: {e}")
+        print(f"[INSERTER] Error during keyboard typing: {e}")
 
 
 def insert_text(text: str, method: str = "clipboard") -> None:
-    """Вставляет распознанный текст в позицию активного курсора."""
+    """Inserts transcribed text at active cursor position."""
     if not text or not text.strip():
         return
 
     now_str = time.strftime("%H:%M:%S")
-    print(f"[{now_str}] [РАСПОЗНАНО]: {text.strip()}")
+    print(f"[{now_str}] [TRANSCRIBED]: {text.strip()}")
 
     if method == "type":
         paste_via_typing(text)

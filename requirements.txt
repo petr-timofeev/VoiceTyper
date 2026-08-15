@@ -1,16 +1,1 @@
-# Windows Client Dependencies
-pynput>=1.7.6
-sounddevice>=0.4.6
-numpy>=1.24.0
-requests>=2.31.0
-pyperclip>=1.8.2
-keyboard>=0.13.5
-Pillow>=10.0.0
-pystray>=0.19.5
-soundfile>=0.12.1
-
-# Mac mini (Apple Silicon) Server Dependencies (for reference / install on macOS)
-# mlx-whisper>=0.4.0
-# fastapi>=0.110.0
-# uvicorn>=0.28.0
-# soundfile>=0.12.1
+-r requirements-client.txt

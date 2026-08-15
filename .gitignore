@@ -25,7 +25,9 @@ venv/
 .venv/
 env/
 ENV/
-hermes-agent/
+
+# Local User Configuration (keep private)
+config.json
 
 # Audio & Log Artifacts
 *.wav
@@ -37,6 +39,9 @@ whisper_server.log
 last_recording.wav
 last_recording_normalized.wav
 recognized_user_text.txt
+
+# Generated Shortcuts & VBS on Windows
+VoiceTyper.vbs
 
 # IDEs & OS files
 .idea/

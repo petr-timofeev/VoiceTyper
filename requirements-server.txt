@@ -1,0 +1,5 @@
+mlx-whisper>=0.4.0
+fastapi>=0.110.0
+uvicorn>=0.28.0
+soundfile>=0.12.1
+numpy>=1.24.0

@@ -5,7 +5,7 @@ import time
 
 LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice_typer.log")
 
-# Безопасное перенаправление вывода для pythonw.exe (без падений)
+# Safe stdout/stderr redirection for pythonw.exe (no console crash)
 if sys.stdout is None:
     try:
         sys.stdout = open(LOG_PATH, "a", encoding="utf-8", buffering=1)
@@ -41,20 +41,20 @@ from whisper_client import is_server_available, transcribe_batch
 class VoiceTyperApp:
     def __init__(self):
         self.config = load_config()
-        self.server_ip = self.config.get("server_ip", "192.168.64.150")
+        self.server_ip = self.config.get("server_ip", "192.168.1.100")
         self.server_port = int(self.config.get("server_port", 9090))
-        self.hotkey_name = self.config.get("hotkey", "home").lower()
+        self.hotkey_name = self.config.get("hotkey", "pause").lower()
         self.model = self.config.get("model", "large-v3-turbo")
         self.language = self.config.get("language", "ru")
         self.initial_prompt = self.config.get("initial_prompt", "")
         self.paste_method = self.config.get("paste_method", "clipboard")
         self.sample_rate = int(self.config.get("sample_rate", 16000))
-        self.device_keyword = self.config.get("device_keyword", "H2n")
+        self.device_keyword = self.config.get("device_keyword", "")
 
         self.audio = AudioRecorder(
             sample_rate=self.sample_rate,
             device_keyword=self.device_keyword,
-            live_gain=4.0
+            live_gain=1.0
         )
 
         self.tray = TrayApp(
@@ -70,9 +70,9 @@ class VoiceTyperApp:
         self._lock = threading.Lock()
 
     def is_target_key(self, key) -> bool:
-        """Проверяет, совпадает ли нажатая клавиша с настроенной горячей клавишей (например, PAUSE, HOME, INSERT)."""
+        """Checks if pressed key matches configured push-to-talk hotkey."""
         target = self.hotkey_name.lower()
-        
+
         if target in ("pause", "pause_break"):
             if key == pynput_keyboard.Key.pause:
                 return True
@@ -108,7 +108,7 @@ class VoiceTyperApp:
                 return
             self.is_key_down = True
 
-        print(f"\n[{time.strftime('%H:%M:%S')}] >>> [{self.hotkey_name.upper()} НАЖАТ]: Запись звука...")
+        print(f"\n[{time.strftime('%H:%M:%S')}] >>> [{self.hotkey_name.upper()} PRESSED]: Recording audio...")
         self.tray.set_state("recording")
         self.audio.start()
 
@@ -122,19 +122,19 @@ class VoiceTyperApp:
             self.is_key_down = False
             self.is_processing = True
 
-        print(f"[{time.strftime('%H:%M:%S')}] <<< [{self.hotkey_name.upper()} ОТПУЩЕН]: Завершение записи, отправка на Mac...")
+        print(f"[{time.strftime('%H:%M:%S')}] <<< [{self.hotkey_name.upper()} RELEASED]: Transcribing audio...")
         self.tray.set_state("processing")
         audio_data = self.audio.stop(post_roll_sec=0.0)
 
         if audio_data is None or len(audio_data) < 3200:
-            print("[ИНФО] Слишком короткое нажатие (менее 0.2 сек).")
+            print("[INFO] Audio too short (< 0.2s). Skipping.")
             self.tray.set_state("ready")
             with self._lock:
                 self.is_processing = False
             return
 
         dur = len(audio_data) / self.sample_rate
-        print(f"[AUDIO] Записано {dur:.2f} сек. Отправка на Mac mini GPU...")
+        print(f"[AUDIO] Captured {dur:.2f}s audio. Sending to Whisper server...")
 
         def _process_in_background():
             try:
@@ -150,12 +150,12 @@ class VoiceTyperApp:
                 latency = time.time() - t0
 
                 if text:
-                    print(f"[УСПЕХ ({latency:.2f}с)]: РАСПОЗНАНО: \"{text}\"")
+                    print(f"[SUCCESS ({latency:.2f}s)]: Transcribed: \"{text}\"")
                     insert_text(text, method=self.paste_method)
                 else:
-                    print(f"[ИНФО ({latency:.2f}с)]: Речь не обнаружена на сервере.")
+                    print(f"[INFO ({latency:.2f}s)]: No speech detected.")
             except Exception as e:
-                print(f"[ERROR] Ошибка при обработке: {e}")
+                print(f"[ERROR] Processing error: {e}")
             finally:
                 with self._lock:
                     self.is_processing = False
@@ -164,26 +164,26 @@ class VoiceTyperApp:
         threading.Thread(target=_process_in_background, daemon=True).start()
 
     def shutdown(self):
-        """Корректное завершение всех процессов."""
-        print("[VOICE TYPER] Завершение работы...")
+        """Cleans up audio capture and background workers."""
+        print("[VOICE TYPER] Shutting down...")
         self.is_running = False
         self.audio.stop(post_roll_sec=0.0)
+        self.audio.close()
 
     def start(self):
         print("==================================================")
-        print(" Voice Typer (Фоновый режим) запущен!")
-        print(f" Сервер Whisper: http://{self.server_ip}:{self.server_port}")
-        print(f" Модель: {self.model}")
-        print(f" Горячая клавиша: [{self.hotkey_name.upper()}] (Удерживайте при разговоре)")
-        print(f" Микрофон: {self.device_keyword}")
-        print(f" Лог работы: {LOG_PATH}")
-        print(" Иконка работает в системном трее Windows.")
+        print(" VoiceTyper Windows Client Started!")
+        print(f" Whisper Server: http://{self.server_ip}:{self.server_port}")
+        print(f" Model: {self.model}")
+        print(f" Push-to-Talk Key: [{self.hotkey_name.upper()}] (Hold while speaking)")
+        print(f" Log File: {LOG_PATH}")
+        print(" System Tray Icon is active.")
         print("==================================================")
 
         if is_server_available(self.server_ip, self.server_port):
             self.tray.set_state("ready")
         else:
-            print("[ПРЕДУПРЕЖДЕНИЕ] Сервер сейчас недоступен.")
+            print("[WARNING] Whisper server is currently offline or unreachable.")
             self.tray.set_state("offline")
 
         keyboard_listener = pynput_keyboard.Listener(

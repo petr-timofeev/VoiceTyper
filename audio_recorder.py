@@ -9,8 +9,11 @@ import sounddevice as sd
 LAST_RECORDING_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "last_recording.wav")
 
 
-def find_microphone_device(keyword: str = "H2n") -> Optional[int]:
-    """Ищет микрофон по ключевому слову в названии, исключая WDM-KS драйверы."""
+def find_microphone_device(keyword: str = "") -> Optional[int]:
+    """Finds an audio input device matching keyword, avoiding WDM-KS drivers."""
+    if not keyword:
+        return None  # Use system default input device
+
     try:
         devices = sd.query_devices()
         hostapis = sd.query_hostapis()
@@ -20,15 +23,15 @@ def find_microphone_device(keyword: str = "H2n") -> Optional[int]:
                 api_name = hostapis[hostapi_id].get("name", "") if hostapi_id < len(hostapis) else ""
                 dev_name = dev.get("name", "")
                 if "WDM-KS" not in api_name:
-                    if keyword.lower() in dev_name.lower() or "zoom" in dev_name.lower() or "микрофон" in dev_name.lower():
+                    if keyword.lower() in dev_name.lower():
                         return i
     except Exception as e:
-        print(f"[AUDIO] Ошибка поиска микрофона: {e}")
+        print(f"[AUDIO] Error querying audio devices: {e}")
     return None
 
 
 def normalize_audio(audio_data: np.ndarray, target_peak: float = 0.90) -> np.ndarray:
-    """Автоматически нормализует громкость звука до оптимального уровня для Whisper (пик 0.9)."""
+    """Normalizes audio volume to optimal level for Whisper inference."""
     if audio_data is None or len(audio_data) == 0:
         return audio_data
 
@@ -40,7 +43,7 @@ def normalize_audio(audio_data: np.ndarray, target_peak: float = 0.90) -> np.nda
 
 
 def save_audio_to_wav_async(audio_data: np.ndarray, file_path: str = LAST_RECORDING_PATH, sample_rate: int = 16000) -> None:
-    """Сохраняет WAV файл асинхронно в фоне без задержек основного пайплайна."""
+    """Saves debug WAV recording asynchronously in background thread."""
     def _worker():
         try:
             int16_data = (np.clip(audio_data, -1.0, 1.0) * 32767).astype(np.int16)
@@ -50,33 +53,32 @@ def save_audio_to_wav_async(audio_data: np.ndarray, file_path: str = LAST_RECORD
                 wf.setframerate(sample_rate)
                 wf.writeframes(int16_data.tobytes())
         except Exception as e:
-            print(f"[AUDIO] Ошибка сохранения WAV: {e}")
+            print(f"[AUDIO] Error saving WAV: {e}")
 
     threading.Thread(target=_worker, daemon=True).start()
 
 
 class AudioRecorder:
-    """Высокопроизводительный модуль непрерывного аудиозахвата с нулевой задержкой."""
+    """High-performance continuous audio capture module with zero startup latency."""
 
-    def __init__(self, sample_rate: int = 16000, device_keyword: str = "H2n", live_gain: float = 4.0):
+    def __init__(self, sample_rate: int = 16000, device_keyword: str = "", live_gain: float = 1.0):
         self.sample_rate = sample_rate
         self.device_keyword = device_keyword
         self.live_gain = live_gain
-        self.device_id = find_microphone_device(device_keyword)
+        self.device_id = find_microphone_device(device_keyword) if device_keyword else None
         self.stream: Optional[sd.InputStream] = None
         self._is_recording = False
         self._frames: List[np.ndarray] = []
         self._lock = threading.Lock()
         self._chunk_callback: Optional[Callable[[np.ndarray], None]] = None
 
-        # Запускаем постоянный поток захвата
+        # Keep stream active continuously
         self._init_stream()
 
     def _init_stream(self):
-        """Инициализирует и запускает непрерывный аудиопоток."""
+        """Initializes and starts persistent audio input stream."""
         def _sd_callback(indata, frames, time_info, status):
             if self._is_recording:
-                # Применяем live gain (аппаратная компенсация)
                 boosted = np.clip(indata.copy() * self.live_gain, -1.0, 1.0)
                 with self._lock:
                     if self._is_recording:
@@ -90,12 +92,12 @@ class AudioRecorder:
                 samplerate=self.sample_rate,
                 channels=1,
                 dtype="float32",
-                blocksize=800,  # 50мс чанки для быстрого отклика
+                blocksize=800,  # 50ms chunks
                 callback=_sd_callback
             )
             self.stream.start()
         except Exception as e:
-            print(f"[AUDIO] Ошибка инициализации InputStream: {e}")
+            print(f"[AUDIO] Error initializing InputStream: {e}")
             self.stream = None
 
     @property
@@ -103,19 +105,18 @@ class AudioRecorder:
         return self._is_recording
 
     def start(self, chunk_callback: Optional[Callable[[np.ndarray], None]] = None) -> bool:
-        """Мгновенно активирует накопление аудиосемплов (0 мс задержка)."""
+        """Instantly enables audio accumulation (0ms latency)."""
         with self._lock:
             self._frames.clear()
             self._chunk_callback = chunk_callback
             self._is_recording = True
 
-        # Если поток упал — восстанавливаем
         if self.stream is None or not self.stream.active:
             self._init_stream()
         return True
 
     def stop(self, post_roll_sec: float = 0.0) -> Optional[np.ndarray]:
-        """Мгновенно останавливает запись и возвращает нормализованный float32 массив."""
+        """Stops recording and returns normalized float32 numpy array."""
         with self._lock:
             if not self._is_recording:
                 return None
@@ -127,15 +128,12 @@ class AudioRecorder:
             raw_audio = np.concatenate(self._frames)
             self._frames.clear()
 
-        # Нормализация
         normalized_audio = normalize_audio(raw_audio, target_peak=0.90)
-
-        # Фоновое сохранение WAV для отладки (без блокировки отклика)
         save_audio_to_wav_async(normalized_audio, LAST_RECORDING_PATH, self.sample_rate)
         return normalized_audio
 
     def close(self):
-        """Закрывает аудиопоток при выходе из программы."""
+        """Closes audio stream cleanly upon exit."""
         with self._lock:
             self._is_recording = False
             if self.stream:
