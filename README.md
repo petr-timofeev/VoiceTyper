@@ -5,36 +5,38 @@
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6.svg?logo=windows&logoColor=white)](https://microsoft.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
-**VoiceTyper** is an ultra-low-latency, 100% private, self-hosted push-to-talk voice typing system designed for dual-setup workflows (Windows PC + Apple Silicon Mac).
+**VoiceTyper** is a 100% free, private, self-hosted push-to-talk voice typing system designed for dual-machine setups (Windows PC + Apple Silicon Mac).
 
-Hold your push-to-talk key (default: `Pause`), speak into your microphone, release the key, and have your speech transcribed and pasted into **any active input field** across Windows (Telegram, Notion, VS Code, Word, web browser, etc.) within **~150–200ms**.
+Hold your push-to-talk key (default: `Pause`), speak into your microphone, release the key, and have your speech transcribed and pasted into **any active input field** across Windows (Telegram, Notion, VS Code, Word, web browser, etc.) using hardware-accelerated OpenAI Whisper inference running on an Apple Silicon (Mac mini / MacBook M1/M2/M3/M4) local server.
 
 ---
 
 ## 💡 Why VoiceTyper? (Motivation)
 
-Like many developers and knowledge workers, I work on a powerful **Windows PC** workstation, but I also have an **Apple Silicon Mac (Mac mini M1)** on the same local network. 
+Like many developers and knowledge workers, I work primarily on a **Windows PC** workstation, but I also have an **Apple Silicon Mac (Mac mini M1)** on the same local network.
 
-I loved the effortless experience of tools like **Wispr Flow** and **Willow Voice**, but I ran into several major drawbacks:
-1. **Expensive Subscriptions:** Commercial dictation tools often charge $15–$30/month.
-2. **Privacy Concerns:** Every word you dictate gets sent over the internet to third-party cloud servers.
+I loved the effortless experience of commercial tools like **Wispr Flow** and **Willow Voice**, but I ran into several major drawbacks:
+1. **Expensive Monthly Subscriptions:** Commercial dictation tools charge $15–$30/month.
+2. **Privacy Concerns:** Every word you dictate gets streamed to third-party cloud servers.
 3. **PC Resource Overhead:** Running large Whisper models locally on a Windows gaming or work PC can hog GPU VRAM and cause micro-stutters during heavy tasks.
 
-**VoiceTyper was built to solve this exact problem:**  
-It offloads the heavy neural speech recognition to your idle Mac mini's Apple Silicon unified memory (via Apple MLX on Metal GPU) over your ultra-fast local network. You get **instant, air-gapped, zero-cost push-to-talk dictation everywhere in Windows** with **<200ms latency**.
+**VoiceTyper was built to solve this exact dilemma:**  
+It offloads speech recognition to your idle Mac mini's Apple Silicon unified memory (via Apple MLX on Metal GPU) over your local network. You get **instant, air-gapped, zero-cost push-to-talk dictation everywhere in Windows** with **zero cloud dependencies and zero impact on your PC performance**.
 
 ---
 
-### 📊 Comparison
+### 📊 Honest Comparison & Real Latency
 
 | Feature | 🎙️ VoiceTyper | 🌐 Wispr Flow / Willow Voice | 🐢 Local Whisper on PC (CPU) |
 |---|:---:|:---:|:---:|
 | **Cost** | **100% Free & Open Source** | $15–$30 / month | Free |
 | **Privacy** | **100% Local LAN (Air-Gapped)** | Cloud servers | Local |
-| **Latency** | **~150–200ms (Metal GPU)** | ~500–1500ms (Internet roundtrip) | 1.5–4.0s (CPU lag) |
+| **Real Latency (Mac M1)** | **~350ms (`small`) / ~1.2s (`large-turbo`)** | ~300–600ms (H100 Datacenter GPUs) | 2.5–5.0s (CPU lag) |
 | **PC Performance Impact** | **0% (Offloaded to Mac)** | 0% (Cloud) | High CPU/GPU load |
 | **Cold-Start Lag** | **0 ms (Pre-warmed in VRAM)** | Varies | 3–5 seconds |
-| **Custom Vocabulary (`initial_prompt`)** | **Yes (Full custom control)** | Limited | Depends on implementation |
+| **Custom Vocabulary (`initial_prompt`)** | **Yes (Full custom control)** | Limited | Depends on setup |
+
+> ℹ️ **Note on Speed:** Commercial cloud services run on multi-thousand-dollar NVIDIA H100 datacenter clusters. While VoiceTyper on a $500 Mac mini M1 may take ~1.2s with the massive `large-v3-turbo` model, switching to the `small` model achieves blistering **~350ms** turnaround while remaining **completely free and 100% private**.
 
 ---
 
@@ -43,7 +45,7 @@ It offloads the heavy neural speech recognition to your idle Mac mini's Apple Si
 > **👋 Hey there!**  
 > I am not a 20-year veteran C++/systems engineer — I am a passionate builder and **"vibe coder"** who created VoiceTyper to scratch my own daily itch and solve a real workflow bottleneck between my Windows PC and Mac mini M1.
 >
-> The codebase is built with modern AI-assisted engineering: it is pragmatic, clean, thoroughly tested in real-world daily use, and designed to **just work**. 
+> The codebase is built with modern AI-assisted engineering: it is pragmatic, clean, thoroughly tested in real-world daily use, and designed to **just work**.
 >
 > If you find a bug, have an optimization idea, or want to add a feature — please be kind! Pull Requests, code reviews, and constructive feedback are warmly welcomed and appreciated. Let's make voice typing accessible to everyone together! ❤️
 
@@ -51,8 +53,8 @@ It offloads the heavy neural speech recognition to your idle Mac mini's Apple Si
 
 ## ✨ Key Features
 
-- **⚡ Ultra-Low End-to-End Latency (<200ms):**
-  - **Apple MLX Metal GPU Engine:** Runs quantized and turbo Whisper models (`large-v3-turbo`) directly on Apple Silicon unified memory.
+- **⚡ Hardware Accelerated Local Inference:**
+  - **Apple MLX Metal GPU Engine:** Runs quantized and turbo Whisper models (`small`, `medium`, `large-v3-turbo`) directly on Apple Silicon unified memory.
   - **Server Warm-Up:** Pre-warms model weights in VRAM and compiles Metal computational shaders on daemon startup (**0ms cold start**).
   - **Raw PCM Streaming:** Sends raw `float32 PCM` audio directly in the HTTP body via `/transcribe_raw` without WAV container encoding/decoding overhead.
   - **HTTP Keep-Alive Connection Pool:** Eliminates per-request TCP three-way handshakes.
@@ -71,7 +73,7 @@ It offloads the heavy neural speech recognition to your idle Mac mini's Apple Si
 │             Windows Client             │ ──────────────────────────────────────► │        Apple Silicon Mac Server        │
 │                                        │                                         │                                        │
 │  [Hold Hotkey (e.g. Pause)]            │                                         │  FastAPI + Apple MLX Metal GPU Engine  │
-│  1. Continuous Audio Stream (16kHz)    │ ──── Raw Float32 PCM (/transcribe_raw) ►│  1. Pre-Warmed large-v3-turbo Model    │
+│  1. Continuous Audio Stream (16kHz)    │ ──── Raw Float32 PCM (/transcribe_raw) ►│  1. Pre-Warmed Model (small / turbo)   │
 │  2. Instant Stop on Key Release        │                                         │  2. Greedy Decoding (beam_size=1)      │
 │  3. Atomic Ctrl+V via Win32 API        │ ◄─── JSON Response ("transcribed text") ┤  3. Vocabulary Biasing (initial_prompt)│
 └────────────────────────────────────────┘                                         └────────────────────────────────────────┘
@@ -143,7 +145,7 @@ It offloads the heavy neural speech recognition to your idle Mac mini's Apple Si
      "server_ip": "192.168.1.100",
      "server_port": 9090,
      "hotkey": "pause",
-     "model": "large-v3-turbo",
+     "model": "small",
      "language": "ru",
      "initial_prompt": "Optional terminology, names, or dialect hints.",
      "paste_method": "clipboard",
@@ -173,7 +175,7 @@ It offloads the heavy neural speech recognition to your idle Mac mini's Apple Si
 | `server_ip` | string | `"192.168.1.100"` | IP address of your Mac mini / Whisper server on local network. |
 | `server_port` | integer | `9090` | Port of the Whisper HTTP server. |
 | `hotkey` | string | `"pause"` | Push-to-talk key (`"pause"`, `"insert"`, `"home"`, `"f8"`, etc.). |
-| `model` | string | `"large-v3-turbo"` | Whisper model (`"large-v3-turbo"`, `"small"`, `"medium"`, `"large-v3"`). |
+| `model` | string | `"small"` | Whisper model (`"small"` for ultra-fast ~350ms speed, or `"large-v3-turbo"` for maximum accuracy). |
 | `language` | string | `"ru"` | Language code (`"ru"`, `"en"`, `"de"`, `"fr"`, `"es"`, etc.). |
 | `initial_prompt` | string | `""` | Custom vocabulary hint for Whisper to bias recognition toward rare words/names. |
 | `paste_method` | string | `"clipboard"` | Text insertion mode (`"clipboard"` for instant Ctrl+V or `"type"` for character typing). |
