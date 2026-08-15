@@ -163,6 +163,19 @@ class VoiceTyperApp:
 
         threading.Thread(target=_process_in_background, daemon=True).start()
 
+    def _start_heartbeat(self):
+        """Periodically pings Whisper server in background to keep tray icon status accurate."""
+        def _worker():
+            while self.is_running:
+                time.sleep(8.0)
+                if not self.is_key_down and not self.is_processing:
+                    online = is_server_available(self.server_ip, self.server_port)
+                    target_state = "ready" if online else "offline"
+                    if self.tray.current_state != target_state:
+                        self.tray.set_state(target_state)
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
     def shutdown(self):
         """Cleans up audio capture and background workers."""
         print("[VOICE TYPER] Shutting down...")
@@ -180,11 +193,15 @@ class VoiceTyperApp:
         print(" System Tray Icon is active.")
         print("==================================================")
 
+        # Initial server check
         if is_server_available(self.server_ip, self.server_port):
             self.tray.set_state("ready")
         else:
             print("[WARNING] Whisper server is currently offline or unreachable.")
             self.tray.set_state("offline")
+
+        # Start periodic background health check
+        self._start_heartbeat()
 
         keyboard_listener = pynput_keyboard.Listener(
             on_press=self.on_key_press,

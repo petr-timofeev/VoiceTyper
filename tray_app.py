@@ -82,7 +82,7 @@ class TrayApp:
         self.server_port = server_port
         self.hotkey_name = hotkey_name.upper()
         self.on_exit_callback = on_exit_callback
-        self.current_state = "gray"
+        self.current_state = "ready"
 
         self.icons = {
             "ready": create_state_icon("green"),
@@ -93,6 +93,15 @@ class TrayApp:
 
         self.icon: Optional[pystray.Icon] = None
         self._lock = threading.Lock()
+
+    def _get_tooltip(self, state: str) -> str:
+        tooltips = {
+            "ready": f"Voice Typer: Ready (Hold {self.hotkey_name})",
+            "recording": "Voice Typer: Recording audio...",
+            "processing": "Voice Typer: Transcribing & inserting text...",
+            "offline": f"Voice Typer: Server {self.server_ip}:{self.server_port} offline"
+        }
+        return tooltips.get(state, "Voice Typer")
 
     def _build_menu(self) -> pystray.Menu:
         def on_toggle_autostart(icon, item):
@@ -125,26 +134,28 @@ class TrayApp:
                 state = "ready"
             self.current_state = state
 
-            tooltips = {
-                "ready": f"Voice Typer: Ready (Hold {self.hotkey_name})",
-                "recording": "Voice Typer: Recording audio...",
-                "processing": "Voice Typer: Transcribing & inserting text...",
-                "offline": f"Voice Typer: Server {self.server_ip}:{self.server_port} offline"
-            }
-
             if self.icon:
-                self.icon.icon = self.icons[state]
-                self.icon.title = tooltips.get(state, "Voice Typer")
+                try:
+                    self.icon.icon = self.icons[state]
+                    self.icon.title = self._get_tooltip(state)
+                except Exception:
+                    pass
+
+    def _setup_tray(self, icon: pystray.Icon):
+        """Called once tray icon loop starts in Windows desktop."""
+        icon.visible = True
+        self.set_state(self.current_state)
 
     def run(self) -> None:
         """Runs the system tray icon loop."""
+        initial_state = self.current_state if self.current_state in self.icons else "ready"
         self.icon = pystray.Icon(
             name="VoiceTyper",
-            icon=self.icons["offline"],
-            title="Voice Typer: Starting...",
+            icon=self.icons[initial_state],
+            title=self._get_tooltip(initial_state),
             menu=self._build_menu()
         )
-        self.icon.run()
+        self.icon.run(setup=self._setup_tray)
 
     def stop(self) -> None:
         """Stops tray icon."""
