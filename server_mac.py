@@ -53,7 +53,7 @@ MLX_MODELS: Dict[str, str] = {
 
 DEFAULT_MODEL_REPO = "mlx-community/whisper-large-v3-turbo"
 OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "qwen2.5:14b"
+OLLAMA_MODEL = "qwen2.5:3b"
 
 
 class TranslationRequest(BaseModel):
@@ -105,12 +105,14 @@ def run_local_translation(text: str, target_language: str = "Slovenian", model: 
                 "prompt": text.strip(),
                 "system": system_prompt,
                 "stream": False,
+                "keep_alive": "5m",
                 "options": {
+                    "num_ctx": 512,
                     "temperature": 0.1,
                     "top_p": 0.9
                 }
             },
-            timeout=20.0
+            timeout=15.0
         )
         if resp.status_code == 200:
             data = resp.json()
