@@ -57,10 +57,10 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
   - **Raw PCM Streaming:** Sends raw `float32 PCM` audio via `/transcribe_raw` without WAV overhead.
   - **Single Instance Windows Mutex:** Prevents duplicate background processes and double-paste glitches.
 - **🌐 Voice-Activated Translation:**
-  - Say *«Переведи на словенский: добрый день, я скоро буду»* or *«Translate to German: Thank you very much»* — VoiceTyper automatically translates the sentence via local LLM (Ollama Qwen2.5 on Mac) and pastes the translation directly!
+  - Say *«Переведи на немецкий: добрый день, я скоро буду»* or *«Translate to Spanish: Thank you very much»* — VoiceTyper automatically translates the sentence via local LLM (Ollama Qwen2.5 on Mac) and pastes the translation directly!
 - **🔄 Guaranteed Custom Replacements (`custom_replacements`):**
-  - Fix tricky phonetic homophones (e.g. Slavic -> Slovenian) with 100% regex-based precision.
-- **🎯 Custom Vocabulary Biasing (`initial_prompt`):** Guide Whisper toward specialized names, regional terminology, and dialects.
+  - Fix tricky phonetic homophones or domain-specific abbreviations with 100% regex-based precision.
+- **🎯 Custom Vocabulary Biasing (`initial_prompt`):** Guide Whisper toward specialized names, regional terminology, and technical jargon.
 - **🖥️ Silent Windows Background Mode & System Tray:** Discreet tray icon with automatic live heartbeat polling (Ready, Recording, Processing, Offline).
 
 ---
@@ -119,11 +119,8 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
      "hotkey": "pause",
      "model": "large-v3-turbo",
      "language": "ru",
-     "initial_prompt": "Словения, Любляна, словенский язык, словенский...",
-     "custom_replacements": {
-       "славянск([а-яё]+)": "словенск\\1",
-       "по-славянски": "по-словенски"
-     },
+     "initial_prompt": "Optional terminology, domain keywords, or technical acronyms.",
+     "custom_replacements": {},
      "translation_enabled": true,
      "paste_method": "clipboard",
      "device_keyword": "",
@@ -165,8 +162,8 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
    - Hold `Pause`, speak naturally, release `Pause`. Your speech is typed instantly.
 2. **Instant Translation:**
    - Hold `Pause` and say:  
-     > *«Переведи на словенский: привет, я скоро буду на встрече»*  
      > *«Переведи на английский: отправь мне пожалуйста финальный счет»*  
+     > *«Translate to German: Thank you very much for your help»*  
    - Release `Pause` — VoiceTyper translates the phrase locally using Ollama and inserts the translated text into the active field!
 
 ---
