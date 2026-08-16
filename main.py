@@ -1,3 +1,4 @@
+import ctypes
 import os
 import sys
 import threading
@@ -216,6 +217,29 @@ class VoiceTyperApp:
             self.shutdown()
 
 
+def acquire_single_instance_lock(mutex_name: str = "Global\\VoiceTyper_SingleInstance_Mutex"):
+    """Ensures only a single instance of VoiceTyper runs on Windows."""
+    ERROR_ALREADY_EXISTS = 183
+    kernel32 = ctypes.windll.kernel32
+    mutex = kernel32.CreateMutexW(None, False, mutex_name)
+    last_error = kernel32.GetLastError()
+    if last_error == ERROR_ALREADY_EXISTS:
+        return None
+    return mutex
+
+
 if __name__ == "__main__":
+    mutex = acquire_single_instance_lock()
+    if not mutex:
+        print("[VOICE TYPER] Another instance of VoiceTyper is already running. Exiting.")
+        sys.exit(0)
+
     app = VoiceTyperApp()
-    app.start()
+    try:
+        app.start()
+    finally:
+        if mutex:
+            try:
+                ctypes.windll.kernel32.CloseHandle(mutex)
+            except Exception:
+                pass

@@ -21,12 +21,31 @@ _SESSION.mount("https://", _ADAPTER)
 
 
 def clean_transcribed_text(text: str) -> str:
-    """Cleans transcribed text from typical Whisper hallucinations and brackets."""
+    """Cleans transcribed text from hallucinations, brackets, and Whisper repetition loops."""
     if not text:
         return ""
     text = re.sub(r"\[.*?\]", "", text)
     text = re.sub(r"\(.*?\)", "", text)
     text = re.sub(r"\s+", " ", text).strip()
+
+    # Check for exact repeated halves (e.g., "Sentence A. Sentence A.")
+    words = text.split()
+    n = len(words)
+    if n >= 4 and n % 2 == 0:
+        half = n // 2
+        if words[:half] == words[half:]:
+            text = " ".join(words[:half])
+
+    # Deduplicate repeated sentences (e.g., "Foo bar. Foo bar.")
+    parts = re.split(r'(?<=[.!?])\s+', text)
+    if len(parts) >= 2:
+        deduped = []
+        for p in parts:
+            p_clean = p.strip().rstrip('.!?')
+            if not deduped or p_clean.lower() != deduped[-1].strip().rstrip('.!?').lower():
+                deduped.append(p.strip())
+        text = " ".join(deduped).strip()
+
     return text
 
 
