@@ -5,7 +5,7 @@
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6.svg?logo=windows&logoColor=white)](https://microsoft.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
-**VoiceTyper** is a 100% free, private, self-hosted push-to-talk voice typing system designed for dual-machine setups (Windows PC + Apple Silicon Mac).
+**VoiceTyper** is a 100% free, private, self-hosted push-to-talk voice typing & AI translation system designed for dual-machine setups (Windows PC + Apple Silicon Mac).
 
 Hold your push-to-talk key (default: `Pause`), speak into your microphone, release the key, and have your speech transcribed and pasted into **any active input field** across Windows (Telegram, Notion, VS Code, Word, web browser, etc.) using hardware-accelerated OpenAI Whisper inference running on an Apple Silicon (Mac mini / MacBook M1/M2/M3/M4) local server.
 
@@ -33,10 +33,8 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
 | **Privacy** | **100% Local LAN (Air-Gapped)** | Cloud servers | Local |
 | **Real Latency (Mac M1)** | **~350ms (`small`) / ~1.2s (`large-turbo`)** | ~300–600ms (H100 Datacenter GPUs) | 2.5–5.0s (CPU lag) |
 | **PC Performance Impact** | **0% (Offloaded to Mac)** | 0% (Cloud) | High CPU/GPU load |
-| **Cold-Start Lag** | **0 ms (Pre-warmed in VRAM)** | Varies | 3–5 seconds |
-| **Custom Vocabulary (`initial_prompt`)** | **Yes (Full custom control)** | Limited | Depends on setup |
-
-> ℹ️ **Note on Speed:** Commercial cloud services run on multi-thousand-dollar NVIDIA H100 datacenter clusters. While VoiceTyper on a $500 Mac mini M1 may take ~1.2s with the massive `large-v3-turbo` model, switching to the `small` model achieves blistering **~350ms** turnaround while remaining **completely free and 100% private**.
+| **Voice Translation** | **Yes (Local LLM via Ollama)** | Cloud | No |
+| **Custom Replacements** | **Yes (Regex & Word Rules)** | Limited | Depends on setup |
 
 ---
 
@@ -54,15 +52,16 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
 ## ✨ Key Features
 
 - **⚡ Hardware Accelerated Local Inference:**
-  - **Apple MLX Metal GPU Engine:** Runs quantized and turbo Whisper models (`small`, `medium`, `large-v3-turbo`) directly on Apple Silicon unified memory.
-  - **Server Warm-Up:** Pre-warms model weights in VRAM and compiles Metal computational shaders on daemon startup (**0ms cold start**).
-  - **Raw PCM Streaming:** Sends raw `float32 PCM` audio directly in the HTTP body via `/transcribe_raw` without WAV container encoding/decoding overhead.
-  - **HTTP Keep-Alive Connection Pool:** Eliminates per-request TCP three-way handshakes.
-  - **Continuous Audio Capture:** Eliminates device re-initialization and PortAudio driver overhead.
-  - **Atomic Win32 Paste:** Instantly emulates `Ctrl+V` using Win32 API without artificial delays.
-- **🎯 Custom Vocabulary Biasing (`initial_prompt`):** Guide Whisper to accurately transcribe specific names, homophones, dialects, and technical terminology (e.g. specialized regional words).
-- **🖥️ Silent Windows Background Mode & System Tray:** Discreet tray icon with automatic live heartbeat polling showing real-time status (Ready, Recording, Processing, Offline) and autostart toggle.
-- **🍎 macOS LaunchAgent Daemon:** Runs as an automatic background service on macOS with auto-restart on reboot.
+  - **Apple MLX Metal GPU Engine:** Runs Whisper models (`small`, `medium`, `large-v3-turbo`) directly on Apple Silicon unified memory.
+  - **Server Warm-Up:** Pre-warms model weights in VRAM and compiles Metal shaders on startup (**0ms cold start**).
+  - **Raw PCM Streaming:** Sends raw `float32 PCM` audio via `/transcribe_raw` without WAV overhead.
+  - **Single Instance Windows Mutex:** Prevents duplicate background processes and double-paste glitches.
+- **🌐 Voice-Activated Translation:**
+  - Say *«Переведи на словенский: добрый день, я скоро буду»* or *«Translate to German: Thank you very much»* — VoiceTyper automatically translates the sentence via local LLM (Ollama Qwen2.5 on Mac) and pastes the translation directly!
+- **🔄 Guaranteed Custom Replacements (`custom_replacements`):**
+  - Fix tricky phonetic homophones (e.g. Slavic -> Slovenian) with 100% regex-based precision.
+- **🎯 Custom Vocabulary Biasing (`initial_prompt`):** Guide Whisper toward specialized names, regional terminology, and dialects.
+- **🖥️ Silent Windows Background Mode & System Tray:** Discreet tray icon with automatic live heartbeat polling (Ready, Recording, Processing, Offline).
 
 ---
 
@@ -73,8 +72,8 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
 │             Windows Client             │ ──────────────────────────────────────► │        Apple Silicon Mac Server        │
 │                                        │                                         │                                        │
 │  [Hold Hotkey (e.g. Pause)]            │                                         │  FastAPI + Apple MLX Metal GPU Engine  │
-│  1. Continuous Audio Stream (16kHz)    │ ──── Raw Float32 PCM (/transcribe_raw) ►│  1. Pre-Warmed Model (small / turbo)   │
-│  2. Instant Stop on Key Release        │                                         │  2. Greedy Decoding (beam_size=1)      │
+│  1. Continuous Audio Stream (16kHz)    │ ──── Raw Float32 PCM (/transcribe_raw) ►│  1. Pre-Warmed Whisper (large-v3-turbo)│
+│  2. Voice Command & Replacement Parser │                                         │  2. Local LLM Translation (Ollama Qwen)│
 │  3. Atomic Ctrl+V via Win32 API        │ ◄─── JSON Response ("transcribed text") ┤  3. Vocabulary Biasing (initial_prompt)│
 └────────────────────────────────────────┘                                         └────────────────────────────────────────┘
 ```
@@ -92,41 +91,14 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
    pip3 install -r requirements-server.txt
    ```
 
-2. Start the transcription server:
+2. *(Optional for Translation)* Ensure Ollama is running on Mac:
    ```bash
-   python3 server_mac.py
+   ollama run qwen2.5:14b
    ```
 
-3. *(Optional but Recommended)* Run as a persistent macOS background daemon:
-   Create `~/Library/LaunchAgents/com.whisper.server.plist`:
-   ```xml
-   <?xml version="1.0" encoding="UTF-8"?>
-   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-   <plist version="1.0">
-   <dict>
-       <key>Label</key>
-       <string>com.whisper.server</string>
-       <key>ProgramArguments</key>
-       <array>
-           <string>/usr/bin/python3</string>
-           <string>/path/to/VoiceTyper/server_mac.py</string>
-       </array>
-       <key>RunAtLoad</key>
-       <true/>
-       <key>KeepAlive</key>
-       <true/>
-       <key>StandardOutPath</key>
-       <string>/Users/your_username/whisper_server.log</string>
-       <key>StandardErrorPath</key>
-       <string>/Users/your_username/whisper_server.log</string>
-       <key>WorkingDirectory</key>
-       <string>/path/to/VoiceTyper</string>
-   </dict>
-   </plist>
-   ```
-   Load and start the daemon:
+3. Start the transcription & translation server:
    ```bash
-   launchctl load -w ~/Library/LaunchAgents/com.whisper.server.plist
+   python3 server_mac.py
    ```
 
 ---
@@ -139,15 +111,20 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
    ```
 
 2. Configure connection settings:
-   Copy `config.example.json` to `config.json` (or let the app auto-generate it):
+   Copy `config.example.json` to `config.json`:
    ```json
    {
      "server_ip": "192.168.1.100",
      "server_port": 9090,
      "hotkey": "pause",
-     "model": "small",
+     "model": "large-v3-turbo",
      "language": "ru",
-     "initial_prompt": "Optional terminology, names, or dialect hints.",
+     "initial_prompt": "Словения, Любляна, словенский язык, словенский...",
+     "custom_replacements": {
+       "славянск([а-яё]+)": "словенск\\1",
+       "по-славянски": "по-словенски"
+     },
+     "translation_enabled": true,
      "paste_method": "clipboard",
      "device_keyword": "",
      "sample_rate": 16000
@@ -158,10 +135,6 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
    ```cmd
    python setup_shortcuts.py
    ```
-   This creates:
-   - `Voice Typer.lnk` on your **Desktop**.
-   - `Voice Typer.lnk` in **Windows Startup** folder (starts automatically on login).
-   - `VoiceTyper.vbs` for silent background execution without a console window.
 
 4. Start VoiceTyper:
    - Double-click `Voice Typer` on your Desktop or run `python main.py`.
@@ -175,48 +148,26 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
 | `server_ip` | string | `"192.168.1.100"` | IP address of your Mac mini / Whisper server on local network. |
 | `server_port` | integer | `9090` | Port of the Whisper HTTP server. |
 | `hotkey` | string | `"pause"` | Push-to-talk key (`"pause"`, `"insert"`, `"home"`, `"f8"`, etc.). |
-| `model` | string | `"small"` | Whisper model (`"small"` for ultra-fast ~350ms speed, or `"large-v3-turbo"` for maximum accuracy). |
-| `language` | string | `"ru"` | Language code (`"ru"`, `"en"`, `"de"`, `"fr"`, `"es"`, etc.). |
-| `initial_prompt` | string | `""` | Custom vocabulary hint for Whisper to bias recognition toward rare words/names. |
-| `paste_method` | string | `"clipboard"` | Text insertion mode (`"clipboard"` for instant Ctrl+V or `"type"` for character typing). |
-| `device_keyword` | string | `""` | Substring to match specific microphone name (empty string uses system default). |
-| `sample_rate` | integer | `16000` | Audio sampling rate (Whisper requires 16000 Hz). |
+| `model` | string | `"large-v3-turbo"` | Whisper model (`"large-v3-turbo"`, `"small"`, `"medium"`). |
+| `language` | string | `"ru"` | Primary transcription language code. |
+| `initial_prompt` | string | `""` | Context hint for Whisper to bias recognition. |
+| `custom_replacements` | object | `{}` | Key-value regex dictionary for guaranteed word/homophone replacements. |
+| `translation_enabled` | boolean | `true` | Enables voice-triggered translation commands (*"Переведи на [язык]: ..."*). |
+| `paste_method` | string | `"clipboard"` | Text insertion mode (`"clipboard"` for instant Ctrl+V or `"type"` for typing). |
+| `device_keyword` | string | `""` | Substring to match specific microphone name (empty uses default). |
+| `sample_rate` | integer | `16000` | Audio sampling rate (16000 Hz). |
 
 ---
 
-## 🎯 Usage
+## 🎯 Usage & Voice Commands
 
-1. Verify that the server is running and the tray icon is **green** (`Ready`).
-2. Place your cursor inside any text field in any Windows application.
-3. **Press and hold the `Pause` key** (the tray icon turns **red** / `Recording`).
-4. Speak your text.
-5. **Release the `Pause` key** — the transcribed text is automatically pasted at your cursor position within milliseconds!
-
----
-
-## 🛠️ Troubleshooting & FAQ
-
-<details>
-<summary><b>1. Server is offline / Tray icon remains gray</b></summary>
-
-- Check that port `9090` is open and reachable over your local network:
-  ```cmd
-  curl http://<SERVER_IP>:9090/
-  ```
-- Make sure macOS Firewall allows incoming connections on port 9090 (System Settings -> Network -> Firewall).
-</details>
-
-<details>
-<summary><b>2. Text is inserted in the wrong place</b></summary>
-
-- Avoid using navigational keys like `Home` or `End` as hotkeys, as Windows will natively move the caret before recording ends. We recommend `Pause` (Pause/Break) or `Insert`.
-</details>
-
-<details>
-<summary><b>3. Text is not pasting into Administrator/Elevated windows</b></summary>
-
-- If you are trying to voice-type into an elevated application (e.g., Administrator PowerShell or Task Manager), launch `VoiceTyper` with Administrator privileges so Windows allows global keystroke simulation.
-</details>
+1. **Standard Push-to-Talk:**
+   - Hold `Pause`, speak naturally, release `Pause`. Your speech is typed instantly.
+2. **Instant Translation:**
+   - Hold `Pause` and say:  
+     > *«Переведи на словенский: привет, я скоро буду на встрече»*  
+     > *«Переведи на английский: отправь мне пожалуйста финальный счет»*  
+   - Release `Pause` — VoiceTyper translates the phrase locally using Ollama and inserts the translated text into the active field!
 
 ---
 

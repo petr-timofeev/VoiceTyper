@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Apple Silicon (MLX Metal GPU) Whisper Server
-============================================
-Ultra-low latency Whisper speech-to-text server optimized for Apple Silicon (M1/M2/M3/M4):
-- Hardware accelerated inference via Apple MLX on Metal GPU
+Apple Silicon (MLX Metal GPU) Whisper & Translation Server
+===========================================================
+Ultra-low latency Whisper speech-to-text & local LLM translation server for Apple Silicon (M1/M2/M3/M4):
+- Hardware accelerated Whisper inference via Apple MLX on Metal GPU
+- Local translation endpoint via local Ollama LLM (Qwen2.5 / Llama 3)
 - Warm-up upon server startup to eliminate cold-start latency (0ms cold start)
-- Support for initial_prompt custom vocabulary biasing
 - Direct raw float32 PCM binary streaming (/transcribe_raw)
 - Backward-compatible standard WAV multipart upload (/transcribe)
+- Translation endpoint (/translate)
 """
 
 import io
@@ -16,12 +17,14 @@ import os
 import sys
 import time
 from contextlib import asynccontextmanager
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
+import requests
 import soundfile as sf
 import uvicorn
 from fastapi import FastAPI, File, Request, Response, UploadFile
+from pydantic import BaseModel
 
 try:
     import mlx_whisper
@@ -49,6 +52,14 @@ MLX_MODELS: Dict[str, str] = {
 }
 
 DEFAULT_MODEL_REPO = "mlx-community/whisper-large-v3-turbo"
+OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_MODEL = "qwen2.5:14b"
+
+
+class TranslationRequest(BaseModel):
+    text: str
+    target_language: str = "Slovenian"
+    model: Optional[str] = None
 
 
 def run_mlx_inference(
@@ -76,27 +87,61 @@ def run_mlx_inference(
     return result.get("text", "").strip()
 
 
+def run_local_translation(text: str, target_language: str = "Slovenian", model: str = OLLAMA_MODEL) -> str:
+    """Performs fast local translation via Ollama Qwen2.5 on Mac mini."""
+    if not text or not text.strip():
+        return ""
+
+    system_prompt = (
+        f"You are a professional, accurate translator. Translate the given text into natural {target_language}. "
+        "Preserve formatting, tone and punctuation. Output ONLY the translated text without explanations, introductions, or quotes."
+    )
+
+    try:
+        resp = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": model,
+                "prompt": text.strip(),
+                "system": system_prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.1,
+                    "top_p": 0.9
+                }
+            },
+            timeout=20.0
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("response", "").strip()
+    except Exception as e:
+        print(f"[TRANSLATE ERROR]: {e}")
+    return text
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager: pre-warms model in Metal VRAM at startup."""
+    """Application lifespan manager: pre-warms Whisper model and Ollama in VRAM at startup."""
     print("==========================================================")
-    print(" 🚀 Starting Apple Silicon Whisper Server (MLX Metal GPU)...")
-    print(f" Default Model: {DEFAULT_MODEL_REPO}")
-    print(" Pre-warming model in Metal GPU memory...")
+    print(" 🚀 Starting Apple Silicon Whisper & Translation Server...")
+    print(f" Default Whisper Model: {DEFAULT_MODEL_REPO}")
+    print(f" Default Translation Model: {OLLAMA_MODEL}")
+    print(" Pre-warming Whisper model in Metal GPU memory...")
     t0 = time.time()
     try:
         dummy_audio = np.zeros(8000, dtype=np.float32)
         run_mlx_inference(dummy_audio, model_key="large-v3-turbo", language="ru")
         warmup_time = time.time() - t0
-        print(f" 🔥 Model pre-warmed in {warmup_time:.2f}s! Ready for instant requests.")
+        print(f" 🔥 Whisper pre-warmed in {warmup_time:.2f}s!")
     except Exception as e:
-        print(f" [WARNING] Pre-warming error: {e}")
+        print(f" [WARNING] Whisper pre-warming error: {e}")
     print("==========================================================")
     yield
     print("[SERVER] Shutting down server...")
 
 
-app = FastAPI(title="Apple Silicon Whisper Server", lifespan=lifespan)
+app = FastAPI(title="Apple Silicon Whisper & Translation Server", lifespan=lifespan)
 
 
 @app.get("/")
@@ -104,7 +149,8 @@ def health_check():
     return {
         "status": "ok",
         "backend": "Apple Silicon MLX Metal GPU" if USE_MLX else "CPU Fallback",
-        "default_model": DEFAULT_MODEL_REPO
+        "default_whisper_model": DEFAULT_MODEL_REPO,
+        "translation_engine": f"Ollama ({OLLAMA_MODEL})"
     }
 
 
@@ -116,7 +162,7 @@ async def transcribe_raw(
     dtype: str = "float32",
     initial_prompt: Optional[str] = None
 ):
-    """Ultra-fast endpoint: accepts raw float32/int16 PCM bytes directly in body (0ms parsing overhead)."""
+    """Ultra-fast endpoint: accepts raw float32/int16 PCM bytes directly in body."""
     t0 = time.time()
     raw_body = await request.body()
     if not raw_body:
@@ -175,6 +221,22 @@ async def transcribe_http(
         "text": text,
         "calc_time_sec": round(calc_time, 3),
         "audio_dur_sec": round(dur_sec, 2)
+    }
+
+
+@app.post("/translate")
+async def translate_endpoint(req: TranslationRequest):
+    """Local translation endpoint using Ollama LLM on Mac mini."""
+    t0 = time.time()
+    model = req.model or OLLAMA_MODEL
+    translated = run_local_translation(req.text, target_language=req.target_language, model=model)
+    calc_time = time.time() - t0
+    print(f"[LOCAL TRANSLATE ({req.target_language})] \"{req.text}\" -> \"{translated}\" in {calc_time:.2f}s")
+    return {
+        "original_text": req.text,
+        "translated_text": translated,
+        "target_language": req.target_language,
+        "calc_time_sec": round(calc_time, 3)
     }
 
 

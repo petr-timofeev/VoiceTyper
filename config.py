@@ -13,6 +13,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "model": "large-v3-turbo",
     "language": "ru",
     "initial_prompt": "",
+    "custom_replacements": {},
+    "translation_enabled": True,
     "paste_method": "clipboard",
     "device_keyword": "",
     "sample_rate": 16000

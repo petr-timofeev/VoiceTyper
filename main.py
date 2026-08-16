@@ -48,6 +48,8 @@ class VoiceTyperApp:
         self.model = self.config.get("model", "large-v3-turbo")
         self.language = self.config.get("language", "ru")
         self.initial_prompt = self.config.get("initial_prompt", "")
+        self.custom_replacements = self.config.get("custom_replacements", {})
+        self.translation_enabled = bool(self.config.get("translation_enabled", True))
         self.paste_method = self.config.get("paste_method", "clipboard")
         self.sample_rate = int(self.config.get("sample_rate", 16000))
         self.device_keyword = self.config.get("device_keyword", "")
@@ -146,7 +148,9 @@ class VoiceTyperApp:
                     server_port=self.server_port,
                     language=self.language,
                     model=self.model,
-                    initial_prompt=self.initial_prompt
+                    initial_prompt=self.initial_prompt,
+                    custom_replacements=self.custom_replacements,
+                    translation_enabled=self.translation_enabled
                 )
                 latency = time.time() - t0
 
