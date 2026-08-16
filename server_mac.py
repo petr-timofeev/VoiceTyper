@@ -53,7 +53,7 @@ MLX_MODELS: Dict[str, str] = {
 
 DEFAULT_MODEL_REPO = "mlx-community/whisper-large-v3-turbo"
 OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "qwen2.5:3b"
+OLLAMA_MODEL = "qwen2.5:14b"
 
 
 class TranslationRequest(BaseModel):
@@ -88,13 +88,14 @@ def run_mlx_inference(
 
 
 def run_local_translation(text: str, target_language: str = "Slovenian", model: str = OLLAMA_MODEL) -> str:
-    """Performs fast local translation via Ollama Qwen2.5 on Mac mini."""
+    """Performs high-quality local translation via Ollama Qwen2.5 on Mac mini."""
     if not text or not text.strip():
         return ""
 
     system_prompt = (
-        f"You are a professional, accurate translator. Translate the given text into natural {target_language}. "
-        "Preserve formatting, tone and punctuation. Output ONLY the translated text without explanations, introductions, or quotes."
+        f"You are a professional, accurate translator. Translate the given text into natural, fluent {target_language}. "
+        "Strictly preserve proper capitalization, all punctuation marks (commas, periods, question marks), acronyms, and numbers. "
+        "Output ONLY the final translated text without any explanation, markdown, or quotation marks."
     )
 
     try:
@@ -107,12 +108,12 @@ def run_local_translation(text: str, target_language: str = "Slovenian", model: 
                 "stream": False,
                 "keep_alive": "5m",
                 "options": {
-                    "num_ctx": 512,
+                    "num_ctx": 2048,
                     "temperature": 0.1,
-                    "top_p": 0.9
+                    "top_p": 0.95
                 }
             },
-            timeout=15.0
+            timeout=25.0
         )
         if resp.status_code == 200:
             data = resp.json()
