@@ -44,7 +44,7 @@ class VoiceTyperApp:
         self.config = load_config()
         self.server_ip = self.config.get("server_ip", "192.168.1.100")
         self.server_port = int(self.config.get("server_port", 9090))
-        self.hotkey_name = self.config.get("hotkey", "pause").lower()
+        self.hotkey_name = self.config.get("hotkey", "f8").lower()
         self.model = self.config.get("model", "large-v3-turbo")
         self.language = self.config.get("language", "ru")
         self.initial_prompt = self.config.get("initial_prompt", "")

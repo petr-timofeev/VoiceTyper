@@ -108,6 +108,14 @@ def clean_transcribed_text(text: str) -> str:
                 deduped.append(p.strip())
         text = " ".join(deduped).strip()
 
+    # Capitalize first letter if it is lowercase
+    if len(text) > 0 and text[0].islower():
+        text = text[0].upper() + text[1:]
+
+    # Ensure ending punctuation (. ? ! … : ; — -)
+    if len(text) > 0 and not re.search(r"[.!?…:;,—\-]$", text):
+        text += "."
+
     return text
 
 
