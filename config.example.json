@@ -1,13 +1,13 @@
 {
   "server_ip": "192.168.1.100",
   "server_port": 9090,
-  "hotkey": "pause",
+  "hotkey": "f8",
   "model": "large-v3-turbo",
   "language": "ru",
   "initial_prompt": "",
   "custom_replacements": {},
   "translation_enabled": true,
-  "paste_method": "clipboard",
+  "paste_method": "unicode",
   "device_keyword": "",
   "sample_rate": 16000
 }

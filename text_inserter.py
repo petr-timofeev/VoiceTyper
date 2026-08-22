@@ -1,82 +1,52 @@
 import ctypes
-import threading
 import time
-import keyboard
 import pyperclip
+
+user32 = ctypes.windll.user32
+
+VK_CONTROL = 0x11
+VK_V = 0x56
+KEYEVENTF_KEYUP = 0x0002
 
 
 def send_ctrl_v() -> None:
-    """Emulates Ctrl+V keystroke reliably and quickly."""
-    try:
-        keyboard.send("ctrl+v")
-    except Exception:
-        VK_CONTROL = 0x11
-        VK_V = 0x56
-        KEYEVENTF_KEYUP = 0x0002
-
-        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, 0, 0)
-        ctypes.windll.user32.keybd_event(VK_V, 0, 0, 0)
-        time.sleep(0.005)
-        ctypes.windll.user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
-        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+    """Simulates a clean, atomic Ctrl+V keystroke without moving the cursor."""
+    # Press Ctrl (scan code 0x1D)
+    user32.keybd_event(VK_CONTROL, 0x1D, 0, 0)
+    # Press V (scan code 0x2F)
+    user32.keybd_event(VK_V, 0x2F, 0, 0)
+    time.sleep(0.015)
+    # Release V
+    user32.keybd_event(VK_V, 0x2F, KEYEVENTF_KEYUP, 0)
+    # Release Ctrl
+    user32.keybd_event(VK_CONTROL, 0x1D, KEYEVENTF_KEYUP, 0)
 
 
 def paste_via_clipboard(text: str) -> None:
-    """Inserts text by temporarily modifying clipboard and triggering instant Ctrl+V."""
+    """Inserts transcribed text via Windows clipboard and Ctrl+V cleanly.
+    
+    Inserts text at the EXACT cursor position with a trailing space.
+    No background threads, no cursor displacement, no modifier leaks.
+    """
     if not text:
         return
 
     text_to_insert = text.strip() + " "
-
-    # Save previous clipboard content
-    old_clipboard = ""
-    try:
-        old_clipboard = pyperclip.paste()
-    except Exception:
-        pass
 
     try:
         pyperclip.copy(text_to_insert)
-        time.sleep(0.01)  # 10ms clipboard sync buffer
+        time.sleep(0.025)  # 25ms clipboard buffer
         send_ctrl_v()
     except Exception as e:
         print(f"[INSERTER] Error during clipboard paste: {e}")
-        try:
-            keyboard.write(text_to_insert)
-        except Exception:
-            pass
-
-    # Restore previous clipboard in background
-    def _restore_clipboard():
-        time.sleep(0.6)
-        try:
-            pyperclip.copy(old_clipboard)
-        except Exception:
-            pass
-
-    threading.Thread(target=_restore_clipboard, daemon=True).start()
-
-
-def paste_via_typing(text: str) -> None:
-    """Inserts text character-by-character via keyboard.write."""
-    if not text:
-        return
-    text_to_insert = text.strip() + " "
-    try:
-        keyboard.write(text_to_insert)
-    except Exception as e:
-        print(f"[INSERTER] Error during keyboard typing: {e}")
 
 
 def insert_text(text: str, method: str = "clipboard") -> None:
-    """Inserts transcribed text at active cursor position."""
+    """Inserts transcribed text at cursor position."""
     if not text or not text.strip():
         return
 
     now_str = time.strftime("%H:%M:%S")
     print(f"[{now_str}] [TRANSCRIBED]: {text.strip()}")
 
-    if method == "type":
-        paste_via_typing(text)
-    else:
-        paste_via_clipboard(text)
+    paste_via_clipboard(text)

@@ -9,7 +9,7 @@ CONFIG_EXAMPLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "
 DEFAULT_CONFIG: Dict[str, Any] = {
     "server_ip": "192.168.1.100",
     "server_port": 9090,
-    "hotkey": "pause",
+    "hotkey": "f8",
     "model": "large-v3-turbo",
     "language": "ru",
     "initial_prompt": "",

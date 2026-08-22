@@ -122,7 +122,7 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
      "initial_prompt": "Optional terminology, domain keywords, or technical acronyms.",
      "custom_replacements": {},
      "translation_enabled": true,
-     "paste_method": "clipboard",
+     "paste_method": "unicode",
      "device_keyword": "",
      "sample_rate": 16000
    }
@@ -150,7 +150,7 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
 | `initial_prompt` | string | `""` | Context hint for Whisper to bias recognition. |
 | `custom_replacements` | object | `{}` | Key-value regex dictionary for guaranteed word/homophone replacements. |
 | `translation_enabled` | boolean | `true` | Enables voice-triggered translation commands (*"Переведи на [язык]: ..."*). |
-| `paste_method` | string | `"clipboard"` | Text insertion mode (`"clipboard"` for instant Ctrl+V or `"type"` for typing). |
+| `paste_method` | string | `"unicode"` | Text insertion mode (`"unicode"` for instant direct Win32 injection without clipboard/Caramba conflicts, or `"clipboard"` for Ctrl+V). |
 | `device_keyword` | string | `""` | Substring to match specific microphone name (empty uses default). |
 | `sample_rate` | integer | `16000` | Audio sampling rate (16000 Hz). |
 

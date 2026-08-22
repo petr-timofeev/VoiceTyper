@@ -7,14 +7,16 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 
 
 def get_pythonw_path() -> str:
-    """Dynamically finds the pythonw.exe corresponding to current Python environment."""
-    current_python = sys.executable
-    if "pythonw.exe" in current_python.lower():
-        return current_python
-    pythonw = os.path.join(os.path.dirname(current_python), "pythonw.exe")
-    if os.path.exists(pythonw):
-        return pythonw
-    return current_python
+    """Finds the primary pythonw.exe that contains all installed dependencies."""
+    candidates = [
+        r"C:\Users\petrt\AppData\Local\Programs\Python\Python313\pythonw.exe",
+        os.path.join(os.path.dirname(sys.executable), "pythonw.exe"),
+        sys.executable.replace("python.exe", "pythonw.exe")
+    ]
+    for cand in candidates:
+        if os.path.exists(cand):
+            return cand
+    return sys.executable
 
 
 def setup_shortcuts():
@@ -23,13 +25,7 @@ def setup_shortcuts():
     main_script = os.path.join(base_dir, "main.py")
     pythonw_path = get_pythonw_path()
 
-    desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
-    shortcut_path = os.path.join(desktop_dir, "Voice Typer.lnk")
-
-    startup_dir = os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu\Programs\Startup")
-    startup_shortcut_path = os.path.join(startup_dir, "Voice Typer.lnk")
-
-    # 1. Create VoiceTyper.vbs (silent background launcher without console window)
+    # 1. Update VoiceTyper.vbs
     vbs_path = os.path.join(base_dir, "VoiceTyper.vbs")
     vbs_content = f'''Set WshShell = CreateObject("WScript.Shell")
 WshShell.CurrentDirectory = "{base_dir}"
@@ -39,28 +35,58 @@ WshShell.Run """{pythonw_path}"" ""{main_script}""", 0, False
         f.write(vbs_content)
     print(f"[OK] Generated VBS launcher: {vbs_path}")
 
-    # 2. Create Desktop & Startup shortcuts via PowerShell WScript.Shell COM object
-    ps_cmd = f'''
-$ws = New-Object -ComObject WScript.Shell;
-$s = $ws.CreateShortcut('{shortcut_path}');
-$s.TargetPath = 'wscript.exe';
-$s.Arguments = '"{vbs_path}"';
-$s.WorkingDirectory = '{base_dir}';
-$s.IconLocation = 'shell32.dll,168';
-$s.Save();
+    # 2. Update VoiceTyper.bat
+    bat_path = os.path.join(base_dir, "VoiceTyper.bat")
+    bat_content = f'''@echo off
+cd /d "%~dp0"
+start "" "{pythonw_path}" main.py
+'''
+    with open(bat_path, "w", encoding="utf-8") as f:
+        f.write(bat_content)
+    print(f"[OK] Generated BAT launcher: {bat_path}")
 
-$s2 = $ws.CreateShortcut('{startup_shortcut_path}');
-$s2.TargetPath = 'wscript.exe';
-$s2.Arguments = '"{vbs_path}"';
-$s2.WorkingDirectory = '{base_dir}';
-$s2.IconLocation = 'shell32.dll,168';
-$s2.Save();
+    # 3. Create Desktop & Startup shortcuts via PowerShell
+    ps_cmd = f'''
+$pythonw = "{pythonw_path}";
+$mainScript = "{main_script}";
+$workDir = "{base_dir}";
+$ws = New-Object -ComObject WScript.Shell;
+
+$desktopDirs = @(
+    [System.Environment]::GetFolderPath('Desktop'),
+    [System.IO.Path]::Combine($env:USERPROFILE, 'Desktop'),
+    [System.IO.Path]::Combine($env:USERPROFILE, 'OneDrive', 'Desktop'),
+    [System.IO.Path]::Combine($env:USERPROFILE, 'OneDrive', 'Рабочий стол')
+);
+
+foreach ($d in $desktopDirs) {{
+    if (Test-Path $d) {{
+        $s = $ws.CreateShortcut([System.IO.Path]::Combine($d, 'Voice Typer.lnk'));
+        $s.TargetPath = $pythonw;
+        $s.Arguments = "`"$mainScript`"";
+        $s.WorkingDirectory = $workDir;
+        $s.IconLocation = "shell32.dll,168";
+        $s.Description = "VoiceTyper AI Voice Typing";
+        $s.Save();
+        Write-Host "[OK] Desktop shortcut created in: $d";
+    }}
+}}
+
+$startupDir = [System.Environment]::GetFolderPath('Startup');
+if (Test-Path $startupDir) {{
+    $s2 = $ws.CreateShortcut([System.IO.Path]::Combine($startupDir, 'Voice Typer.lnk'));
+    $s2.TargetPath = $pythonw;
+    $s2.Arguments = "`"$mainScript`"";
+    $s2.WorkingDirectory = $workDir;
+    $s2.IconLocation = "shell32.dll,168";
+    $s2.Description = "VoiceTyper AI Voice Typing";
+    $s2.Save();
+    Write-Host "[OK] Startup shortcut created: $([System.IO.Path]::Combine($startupDir, 'Voice Typer.lnk'))";
+}}
 '''
     try:
         subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], check=True)
-        print(f"[OK] Desktop shortcut created: {shortcut_path}")
-        print(f"[OK] Windows Startup shortcut created: {startup_shortcut_path}")
-        print("\nVoice Typer is configured to run silently in the background!")
+        print("\nVoice Typer shortcuts successfully configured!")
     except Exception as e:
         print(f"[ERROR] Failed to create shortcuts: {e}")
 

@@ -83,6 +83,18 @@ class VoiceTyperApp:
                 return True
             if getattr(key, "vk", 0) == 19:  # VK_PAUSE
                 return True
+        elif target == "f8":
+            if key == pynput_keyboard.Key.f8 or getattr(key, "name", "") == "f8" or getattr(key, "vk", 0) == 119:
+                return True
+        elif target == "f9":
+            if key == pynput_keyboard.Key.f9 or getattr(key, "name", "") == "f9" or getattr(key, "vk", 0) == 120:
+                return True
+        elif target == "f10":
+            if key == pynput_keyboard.Key.f10 or getattr(key, "name", "") == "f10" or getattr(key, "vk", 0) == 121:
+                return True
+        elif target in ("scroll_lock", "scrolllock"):
+            if key == pynput_keyboard.Key.scroll_lock or getattr(key, "name", "") in ("scroll_lock", "scrolllock") or getattr(key, "vk", 0) == 145:
+                return True
         elif target == "home":
             if key == pynput_keyboard.Key.home:
                 return True
@@ -221,13 +233,13 @@ class VoiceTyperApp:
             self.shutdown()
 
 
-def acquire_single_instance_lock(mutex_name: str = "Global\\VoiceTyper_SingleInstance_Mutex"):
+def acquire_single_instance_lock(mutex_name: str = "VoiceTyper_SingleInstance_Mutex"):
     """Ensures only a single instance of VoiceTyper runs on Windows."""
     ERROR_ALREADY_EXISTS = 183
     kernel32 = ctypes.windll.kernel32
     mutex = kernel32.CreateMutexW(None, False, mutex_name)
     last_error = kernel32.GetLastError()
-    if last_error == ERROR_ALREADY_EXISTS:
+    if not mutex or last_error == ERROR_ALREADY_EXISTS:
         return None
     return mutex
 
