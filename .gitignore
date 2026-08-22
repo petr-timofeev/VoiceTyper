@@ -31,6 +31,7 @@ config.json
 .env
 .env.*
 *.env
+!.env.example
 
 # Audio & Log Artifacts
 *.wav
