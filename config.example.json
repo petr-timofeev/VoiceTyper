@@ -9,6 +9,8 @@
   "translation_enabled": true,
   "translation_engine": "gemini",
   "gemini_translation_model": "gemini-3.5-flash-lite",
+  "asr_engine": "gemini",
+  "gemini_asr_model": "gemini-3.5-flash-lite",
   "paste_method": "clipboard",
   "device_keyword": "",
   "sample_rate": 16000

@@ -287,6 +287,90 @@ def transcribe_via_http_wav(
     return None
 
 
+def transcribe_via_gemini_audio(
+    audio_data: np.ndarray,
+    sample_rate: int = 16000,
+    api_key: Optional[str] = None,
+    model: str = "gemini-3.5-flash-lite",
+    initial_prompt: Optional[str] = None,
+    language: str = "ru"
+) -> Optional[str]:
+    """Transcribes spoken audio directly using Google Gemini Multimodal Audio API."""
+    key = get_gemini_api_key(api_key)
+    if not key:
+        print("[GEMINI ASR] Warning: No API key found.")
+        return None
+
+    # Silence / low-energy check to avoid hallucinating on background noise
+    rms = float(np.sqrt(np.mean(audio_data.astype(np.float32) ** 2)))
+    if rms < 0.003:
+        print(f"  [GEMINI ASR] Audio is near-silent (RMS: {rms:.5f}). Skipping.")
+        return ""
+
+    try:
+        import base64
+        wav_buf = io.BytesIO()
+        sf.write(wav_buf, audio_data, sample_rate, format="WAV", subtype="PCM_16")
+        b64_audio = base64.b64encode(wav_buf.getvalue()).decode("utf-8")
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+        lang_str = "Russian" if language.lower().startswith("ru") else language
+        system_instruction = (
+            "You are an expert, verbatim Speech-to-Text (ASR) transcription engine. "
+            f"Transcribe spoken speech accurately in the spoken language (defaults to {lang_str} unless spoken otherwise). "
+            "Strictly preserve exact capitalization, all punctuation marks (commas, periods, question marks, dashes), numbers, and formatting. "
+            "Do NOT summarize, explain, translate, or answer the speech. "
+            "Output ONLY the verbatim transcription. If there is no speech or only silence/background noise, output nothing."
+        )
+
+        user_text = "Transcribe this audio verbatim."
+        if initial_prompt and initial_prompt.strip():
+            user_text += f" Important vocabulary context: {initial_prompt.strip()}"
+
+        payload = {
+            "contents": [{
+                "parts": [
+                    {
+                        "inlineData": {
+                            "mimeType": "audio/wav",
+                            "data": b64_audio
+                        }
+                    },
+                    {
+                        "text": user_text
+                    }
+                ]
+            }],
+            "systemInstruction": {
+                "parts": [{"text": system_instruction}]
+            },
+            "generationConfig": {
+                "temperature": 0.0,
+                "maxOutputTokens": 1024
+            }
+        }
+        t0 = time.time()
+        resp = _SESSION.post(url, json=payload, timeout=15.0)
+        calc_t = time.time() - t0
+
+        if resp.status_code == 200:
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    raw_text = parts[0].get("text", "").strip()
+                    # Filter out model noise tokens like <noise>, <silence>, etc.
+                    raw_text = re.sub(r"<[^>]+>", "", raw_text).strip()
+                    print(f"  [GEMINI CLOUD ASR]: {calc_t:.2f}s -> \"{raw_text}\"")
+                    return clean_transcribed_text(raw_text)
+        else:
+            print(f"[GEMINI ASR ERROR {resp.status_code}]: {resp.text[:200]}")
+    except Exception as e:
+        print(f"[GEMINI ASR ERROR]: {e}")
+    return None
+
+
 def transcribe_batch(
     audio_data: np.ndarray,
     server_ip: str = "192.168.1.100",
@@ -297,29 +381,38 @@ def transcribe_batch(
     custom_replacements: Optional[Dict[str, str]] = None,
     translation_enabled: bool = True,
     translation_engine: str = "gemini",
-    gemini_model: str = "gemini-3.5-flash-lite",
-    gemini_api_key: Optional[str] = None
+    gemini_translation_model: str = "gemini-3.5-flash-lite",
+    gemini_api_key: Optional[str] = None,
+    asr_engine: str = "gemini",
+    gemini_asr_model: str = "gemini-3.5-flash-lite",
+    sample_rate: int = 16000
 ) -> str:
     """Main transcription & translation pipeline entrypoint."""
     if audio_data is None or len(audio_data) < 3200:  # < 0.2s
         return ""
 
-    dur_sec = len(audio_data) / 16000.0
-    print(f"\n[WHISPER] Sending {dur_sec:.2f}s audio to Whisper server...")
+    dur_sec = len(audio_data) / float(sample_rate)
+    engine_mode = (asr_engine or "gemini").lower()
+    print(f"\n[SPEECH] Processing {dur_sec:.2f}s audio (Engine: {engine_mode.upper()})...")
 
-    # 1. Transcribe audio
-    raw_text = transcribe_via_http_raw(
-        audio_data=audio_data,
-        server_ip=server_ip,
-        server_port=server_port,
-        language=language,
-        model=model,
-        initial_prompt=initial_prompt
-    )
+    raw_text = None
 
-    if raw_text is None:
-        print("  [WHISPER] Fallback to WAV multipart...")
-        raw_text = transcribe_via_http_wav(
+    # 1. Cloud ASR (Gemini) or Auto mode
+    if engine_mode in ("gemini", "auto"):
+        raw_text = transcribe_via_gemini_audio(
+            audio_data=audio_data,
+            sample_rate=sample_rate,
+            api_key=gemini_api_key,
+            model=gemini_asr_model,
+            initial_prompt=initial_prompt,
+            language=language
+        )
+        if raw_text is None and engine_mode == "auto":
+            print("  [SPEECH] Gemini Cloud ASR failed, falling back to Local Mac Whisper...")
+
+    # 2. Local Mac Whisper (if local mode, or if auto mode fell back)
+    if raw_text is None and engine_mode in ("local", "auto"):
+        raw_text = transcribe_via_http_raw(
             audio_data=audio_data,
             server_ip=server_ip,
             server_port=server_port,
@@ -327,14 +420,24 @@ def transcribe_batch(
             model=model,
             initial_prompt=initial_prompt
         )
+        if raw_text is None:
+            print("  [WHISPER] Fallback to WAV multipart...")
+            raw_text = transcribe_via_http_wav(
+                audio_data=audio_data,
+                server_ip=server_ip,
+                server_port=server_port,
+                language=language,
+                model=model,
+                initial_prompt=initial_prompt
+            )
 
     if not raw_text:
         return ""
 
-    # 2. Apply guaranteed custom word/regex replacements
+    # 3. Apply guaranteed custom word/regex replacements
     processed_text = apply_custom_replacements(raw_text, custom_replacements)
 
-    # 3. Check for voice translation command ("Переведи на [язык]: ...")
+    # 4. Check for voice translation command ("Переведи на [язык]: ...")
     if translation_enabled:
         match = TRANSLATE_PATTERN.match(processed_text)
         if match:
@@ -349,7 +452,7 @@ def transcribe_batch(
                     text=payload,
                     target_language=target_language,
                     api_key=gemini_api_key,
-                    model=gemini_model
+                    model=gemini_translation_model
                 )
                 if translated:
                     return translated

@@ -17,6 +17,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "translation_enabled": True,
     "translation_engine": "gemini",
     "gemini_translation_model": "gemini-3.5-flash-lite",
+    "asr_engine": "gemini",
+    "gemini_asr_model": "gemini-3.5-flash-lite",
     "gemini_api_key": "",
     "paste_method": "clipboard",
     "device_keyword": "",

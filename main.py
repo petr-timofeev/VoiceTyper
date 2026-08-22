@@ -33,7 +33,7 @@ import numpy as np
 from pynput import keyboard as pynput_keyboard
 
 from audio_recorder import AudioRecorder, LAST_RECORDING_PATH
-from config import load_config
+from config import load_config, save_config
 from text_inserter import insert_text
 from tray_app import TrayApp
 from whisper_client import is_server_available, transcribe_batch
@@ -52,6 +52,8 @@ class VoiceTyperApp:
         self.translation_enabled = bool(self.config.get("translation_enabled", True))
         self.translation_engine = self.config.get("translation_engine", "gemini")
         self.gemini_translation_model = self.config.get("gemini_translation_model", "gemini-3.5-flash-lite")
+        self.asr_engine = self.config.get("asr_engine", "gemini")
+        self.gemini_asr_model = self.config.get("gemini_asr_model", "gemini-3.5-flash-lite")
         self.gemini_api_key = self.config.get("gemini_api_key", "")
         self.paste_method = self.config.get("paste_method", "clipboard")
         self.sample_rate = int(self.config.get("sample_rate", 16000))
@@ -67,6 +69,10 @@ class VoiceTyperApp:
             server_ip=self.server_ip,
             server_port=self.server_port,
             hotkey_name=self.hotkey_name,
+            asr_engine=self.asr_engine,
+            translation_engine=self.translation_engine,
+            on_change_asr_callback=self.on_change_asr_engine,
+            on_change_translation_callback=self.on_change_translation_engine,
             on_exit_callback=self.shutdown
         )
 
@@ -74,6 +80,20 @@ class VoiceTyperApp:
         self.is_processing = False
         self.is_running = True
         self._lock = threading.Lock()
+
+    def on_change_asr_engine(self, mode: str):
+        """Callback from system tray menu to switch ASR engine on the fly."""
+        self.asr_engine = mode
+        self.config["asr_engine"] = mode
+        save_config(self.config)
+        print(f"\n[CONFIG] Switched Speech Recognition engine to: {mode.upper()}")
+
+    def on_change_translation_engine(self, mode: str):
+        """Callback from system tray menu to switch Translation engine on the fly."""
+        self.translation_engine = mode
+        self.config["translation_engine"] = mode
+        save_config(self.config)
+        print(f"\n[CONFIG] Switched Translation engine to: {mode.upper()}")
 
     def is_target_key(self, key) -> bool:
         """Checks if pressed key matches configured push-to-talk hotkey."""
@@ -140,11 +160,11 @@ class VoiceTyperApp:
             self.is_key_down = False
             self.is_processing = True
 
-        print(f"[{time.strftime('%H:%M:%S')}] <<< [{self.hotkey_name.upper()} RELEASED]: Transcribing audio...")
+        print(f"[{time.strftime('%H:%M:%S')}] <<< [{self.hotkey_name.upper()} RELEASED]: Processing audio...")
         self.tray.set_state("processing")
-        audio_data = self.audio.stop(post_roll_sec=0.0)
 
-        if audio_data is None or len(audio_data) < 3200:
+        audio_data = self.audio.stop(post_roll_sec=0.15)
+        if audio_data is None or len(audio_data) < int(self.sample_rate * 0.2):
             print("[INFO] Audio too short (< 0.2s). Skipping.")
             self.tray.set_state("ready")
             with self._lock:
@@ -152,7 +172,7 @@ class VoiceTyperApp:
             return
 
         dur = len(audio_data) / self.sample_rate
-        print(f"[AUDIO] Captured {dur:.2f}s audio. Sending to Whisper server...")
+        print(f"[AUDIO] Captured {dur:.2f}s audio. Processing via {self.asr_engine.upper()}...")
 
         def _process_in_background():
             try:
@@ -167,8 +187,11 @@ class VoiceTyperApp:
                     custom_replacements=self.custom_replacements,
                     translation_enabled=self.translation_enabled,
                     translation_engine=self.translation_engine,
-                    gemini_model=self.gemini_translation_model,
-                    gemini_api_key=self.gemini_api_key
+                    gemini_translation_model=self.gemini_translation_model,
+                    gemini_api_key=self.gemini_api_key,
+                    asr_engine=self.asr_engine,
+                    gemini_asr_model=self.gemini_asr_model,
+                    sample_rate=self.sample_rate
                 )
                 latency = time.time() - t0
 
@@ -187,13 +210,17 @@ class VoiceTyperApp:
         threading.Thread(target=_process_in_background, daemon=True).start()
 
     def _start_heartbeat(self):
-        """Periodically pings Whisper server in background to keep tray icon status accurate."""
+        """Periodically pings Whisper server in background if local engine is used."""
         def _worker():
             while self.is_running:
                 time.sleep(8.0)
                 if not self.is_key_down and not self.is_processing:
-                    online = is_server_available(self.server_ip, self.server_port)
-                    target_state = "ready" if online else "offline"
+                    if self.asr_engine == "gemini":
+                        target_state = "ready"
+                    else:
+                        online = is_server_available(self.server_ip, self.server_port)
+                        target_state = "ready" if online else "offline"
+
                     if self.tray.current_state != target_state:
                         self.tray.set_state(target_state)
         t = threading.Thread(target=_worker, daemon=True)
@@ -209,12 +236,11 @@ class VoiceTyperApp:
     def start(self):
         print("==================================================")
         print(" VoiceTyper Windows Client Started!")
-        print(f" Whisper Server: http://{self.server_ip}:{self.server_port}")
-        print(f" Whisper Model: {self.model}")
+        print(f" Speech Recognition (ASR): {self.asr_engine.upper()} ({self.gemini_asr_model if self.asr_engine == 'gemini' else 'Whisper ' + self.model})")
         print(f" Translation Engine: {self.translation_engine.upper()} ({self.gemini_translation_model if self.translation_engine == 'gemini' else 'Ollama on Mac'})")
         print(f" Push-to-Talk Key: [{self.hotkey_name.upper()}] (Hold while speaking)")
         print(f" Log File: {LOG_PATH}")
-        print(" System Tray Icon is active.")
+        print(" System Tray Icon with Engine Switcher is active.")
         print("==================================================")
 
         # Initial server check

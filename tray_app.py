@@ -75,12 +75,20 @@ class TrayApp:
         self,
         server_ip: str,
         server_port: int,
-        hotkey_name: str = "PAUSE",
+        hotkey_name: str = "F8",
+        asr_engine: str = "gemini",
+        translation_engine: str = "gemini",
+        on_change_asr_callback: Optional[Callable[[str], None]] = None,
+        on_change_translation_callback: Optional[Callable[[str], None]] = None,
         on_exit_callback: Optional[Callable[[], None]] = None
     ):
         self.server_ip = server_ip
         self.server_port = server_port
         self.hotkey_name = hotkey_name.upper()
+        self.asr_engine = (asr_engine or "gemini").lower()
+        self.translation_engine = (translation_engine or "gemini").lower()
+        self.on_change_asr_callback = on_change_asr_callback
+        self.on_change_translation_callback = on_change_translation_callback
         self.on_exit_callback = on_exit_callback
         self.current_state = "ready"
 
@@ -95,8 +103,9 @@ class TrayApp:
         self._lock = threading.Lock()
 
     def _get_tooltip(self, state: str) -> str:
+        mode_label = "Gemini Cloud" if self.asr_engine == "gemini" else ("Local Mac" if self.asr_engine == "local" else "Auto")
         tooltips = {
-            "ready": f"Voice Typer: Ready (Hold {self.hotkey_name})",
+            "ready": f"Voice Typer [{mode_label}]: Ready (Hold {self.hotkey_name})",
             "recording": "Voice Typer: Recording audio...",
             "processing": "Voice Typer: Transcribing & inserting text...",
             "offline": f"Voice Typer: Server {self.server_ip}:{self.server_port} offline"
@@ -109,6 +118,29 @@ class TrayApp:
             set_autostart(new_state)
             icon.update_menu()
 
+        def set_asr(mode: str):
+            def _handler(icon, item):
+                self.asr_engine = mode
+                if self.on_change_asr_callback:
+                    self.on_change_asr_callback(mode)
+                self.set_state(self.current_state)
+                icon.update_menu()
+            return _handler
+
+        def is_asr(mode: str):
+            return lambda item: self.asr_engine == mode
+
+        def set_trans(mode: str):
+            def _handler(icon, item):
+                self.translation_engine = mode
+                if self.on_change_translation_callback:
+                    self.on_change_translation_callback(mode)
+                icon.update_menu()
+            return _handler
+
+        def is_trans(mode: str):
+            return lambda item: self.translation_engine == mode
+
         def on_exit(icon, item):
             if self.on_exit_callback:
                 self.on_exit_callback()
@@ -116,7 +148,17 @@ class TrayApp:
 
         return pystray.Menu(
             pystray.MenuItem(f"Voice Typer [Key: {self.hotkey_name}]", None, enabled=False),
-            pystray.MenuItem(f"Server: {self.server_ip}:{self.server_port}", None, enabled=False),
+            pystray.MenuItem(f"Local Server: {self.server_ip}:{self.server_port}", None, enabled=False),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Speech Recognition (ASR)", pystray.Menu(
+                pystray.MenuItem("Google Gemini (Cloud)", set_asr("gemini"), checked=is_asr("gemini"), radio=True),
+                pystray.MenuItem("Local Whisper (Mac mini)", set_asr("local"), checked=is_asr("local"), radio=True),
+                pystray.MenuItem("Auto (Gemini + Local Fallback)", set_asr("auto"), checked=is_asr("auto"), radio=True),
+            )),
+            pystray.MenuItem("Translator Engine", pystray.Menu(
+                pystray.MenuItem("Google Gemini Live (Cloud, 0.6s)", set_trans("gemini"), checked=is_trans("gemini"), radio=True),
+                pystray.MenuItem("Local Ollama (Mac mini)", set_trans("local"), checked=is_trans("local"), radio=True),
+            )),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
                 "Start with Windows",
