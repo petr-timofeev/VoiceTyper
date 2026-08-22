@@ -26,8 +26,11 @@ venv/
 env/
 ENV/
 
-# Local User Configuration (keep private)
+# Local User Configuration & Environment (keep private)
 config.json
+.env
+.env.*
+*.env
 
 # Audio & Log Artifacts
 *.wav
