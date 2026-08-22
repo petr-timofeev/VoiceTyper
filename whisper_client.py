@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import re
 import socket
 import threading
@@ -122,6 +123,78 @@ def is_server_available(ip: str, port: int, timeout: float = 1.5) -> bool:
         return False
 
 
+def get_gemini_api_key(configured_key: Optional[str] = None) -> Optional[str]:
+    """Retrieves Google Gemini API key from parameter, .env file, or environment."""
+    if configured_key and configured_key.strip():
+        return configured_key.strip()
+
+    for env_var in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        val = os.environ.get(env_var)
+        if val and val.strip():
+            return val.strip()
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    env_file = os.path.join(base_dir, ".env")
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("#") or not line:
+                        continue
+                    if line.startswith("GEMINI_API_KEY=") or line.startswith("GOOGLE_API_KEY="):
+                        return line.split("=", 1)[1].strip().strip('"').strip("'")
+        except Exception:
+            pass
+    return None
+
+
+def translate_via_gemini(
+    text: str,
+    target_language: str,
+    api_key: Optional[str] = None,
+    model: str = "gemini-3.5-flash-lite"
+) -> str:
+    """Translates text ultra-fast (<0.7s) via Google Gemini API."""
+    key = get_gemini_api_key(api_key)
+    if not key:
+        print("[GEMINI TRANSLATE] Warning: No API key found. Falling back to local translation.")
+        return ""
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+    system_instruction = (
+        f"You are a professional, accurate translator. Translate the given text directly into natural, fluent {target_language}. "
+        "Strictly preserve proper capitalization, all punctuation marks (commas, periods, question marks), acronyms, and numbers. "
+        "Output ONLY the final translated text without any explanation, markdown, or quotation marks."
+    )
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": text}]}],
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 512
+        }
+    }
+    try:
+        t0 = time.time()
+        resp = _SESSION.post(url, json=payload, timeout=12.0)
+        calc_t = time.time() - t0
+        if resp.status_code == 200:
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    translated = parts[0].get("text", "").strip()
+                    print(f"  [GEMINI TRANSLATION ({target_language})]: {calc_t:.2f}s -> \"{translated}\"")
+                    return translated
+        else:
+            print(f"[GEMINI TRANSLATE ERROR {resp.status_code}]: {resp.text[:200]}")
+    except Exception as e:
+        print(f"[GEMINI TRANSLATE ERROR]: {e}")
+    return ""
+
+
 def translate_via_http(
     text: str,
     target_language: str,
@@ -222,7 +295,10 @@ def transcribe_batch(
     model: str = "large-v3-turbo",
     initial_prompt: Optional[str] = None,
     custom_replacements: Optional[Dict[str, str]] = None,
-    translation_enabled: bool = True
+    translation_enabled: bool = True,
+    translation_engine: str = "gemini",
+    gemini_model: str = "gemini-3.5-flash-lite",
+    gemini_api_key: Optional[str] = None
 ) -> str:
     """Main transcription & translation pipeline entrypoint."""
     if audio_data is None or len(audio_data) < 3200:  # < 0.2s
@@ -266,6 +342,20 @@ def transcribe_batch(
             payload = match.group("payload").strip()
             target_language = LANGUAGE_MAP.get(raw_lang, raw_lang.capitalize())
             print(f"[TRANSLATION COMMAND] Target: {target_language}, Text: \"{payload}\"")
+
+            # 1. Try Gemini Cloud Translation if configured
+            if (translation_engine or "gemini").lower() == "gemini":
+                translated = translate_via_gemini(
+                    text=payload,
+                    target_language=target_language,
+                    api_key=gemini_api_key,
+                    model=gemini_model
+                )
+                if translated:
+                    return translated
+                print("  [WHISPER] Gemini translation unavailable, falling back to local Mac server...")
+
+            # 2. Fallback to local Mac Ollama
             translated = translate_via_http(
                 text=payload,
                 target_language=target_language,

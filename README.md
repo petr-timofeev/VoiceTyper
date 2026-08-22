@@ -144,13 +144,15 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
 |---|---|---|---|
 | `server_ip` | string | `"192.168.1.100"` | IP address of your Mac mini / Whisper server on local network. |
 | `server_port` | integer | `9090` | Port of the Whisper HTTP server. |
-| `hotkey` | string | `"pause"` | Push-to-talk key (`"pause"`, `"insert"`, `"home"`, `"f8"`, etc.). |
+| `hotkey` | string | `"f8"` | Push-to-talk key (`"f8"`, `"insert"`, `"home"`, `"pause"`, etc.). |
 | `model` | string | `"large-v3-turbo"` | Whisper model (`"large-v3-turbo"`, `"small"`, `"medium"`). |
 | `language` | string | `"ru"` | Primary transcription language code. |
 | `initial_prompt` | string | `""` | Context hint for Whisper to bias recognition. |
 | `custom_replacements` | object | `{}` | Key-value regex dictionary for guaranteed word/homophone replacements. |
 | `translation_enabled` | boolean | `true` | Enables voice-triggered translation commands (*"Переведи на [язык]: ..."*). |
-| `paste_method` | string | `"unicode"` | Text insertion mode (`"unicode"` for instant direct Win32 injection without clipboard/Caramba conflicts, or `"clipboard"` for Ctrl+V). |
+| `translation_engine` | string | `"gemini"` | Translation engine: `"gemini"` (ultra-fast Google Gemini cloud) or `"local"` (Mac Ollama). |
+| `gemini_translation_model` | string | `"gemini-3.5-flash-lite"` | Gemini model used for cloud translation. |
+| `paste_method` | string | `"clipboard"` | Text insertion mode (`"clipboard"` for instant Win32 Ctrl+V). |
 | `device_keyword` | string | `""` | Substring to match specific microphone name (empty uses default). |
 | `sample_rate` | integer | `16000` | Audio sampling rate (16000 Hz). |
 
@@ -159,10 +161,11 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
 ## 🎯 Usage & Voice Commands
 
 1. **Standard Push-to-Talk:**
-   - Hold `Pause`, speak naturally, release `Pause`. Your speech is typed instantly.
-2. **Instant Translation:**
-   - Hold `Pause` and say:  
+   - Hold `F8`, speak naturally, release `F8`. Your speech is typed instantly.
+2. **Instant Translation (Google Gemini Live / Local LLM):**
+   - Hold `F8` and say:  
      > *«Переведи на английский: отправь мне пожалуйста финальный счет»*  
+     > *«Переведи на словенский: добрый день, я скоро буду»*  
      > *«Translate to German: Thank you very much for your help»*  
    - Release `Pause` — VoiceTyper translates the phrase locally using Ollama and inserts the translated text into the active field!
 

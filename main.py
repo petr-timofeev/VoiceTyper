@@ -50,6 +50,9 @@ class VoiceTyperApp:
         self.initial_prompt = self.config.get("initial_prompt", "")
         self.custom_replacements = self.config.get("custom_replacements", {})
         self.translation_enabled = bool(self.config.get("translation_enabled", True))
+        self.translation_engine = self.config.get("translation_engine", "gemini")
+        self.gemini_translation_model = self.config.get("gemini_translation_model", "gemini-3.5-flash-lite")
+        self.gemini_api_key = self.config.get("gemini_api_key", "")
         self.paste_method = self.config.get("paste_method", "clipboard")
         self.sample_rate = int(self.config.get("sample_rate", 16000))
         self.device_keyword = self.config.get("device_keyword", "")
@@ -162,7 +165,10 @@ class VoiceTyperApp:
                     model=self.model,
                     initial_prompt=self.initial_prompt,
                     custom_replacements=self.custom_replacements,
-                    translation_enabled=self.translation_enabled
+                    translation_enabled=self.translation_enabled,
+                    translation_engine=self.translation_engine,
+                    gemini_model=self.gemini_translation_model,
+                    gemini_api_key=self.gemini_api_key
                 )
                 latency = time.time() - t0
 
@@ -204,7 +210,8 @@ class VoiceTyperApp:
         print("==================================================")
         print(" VoiceTyper Windows Client Started!")
         print(f" Whisper Server: http://{self.server_ip}:{self.server_port}")
-        print(f" Model: {self.model}")
+        print(f" Whisper Model: {self.model}")
+        print(f" Translation Engine: {self.translation_engine.upper()} ({self.gemini_translation_model if self.translation_engine == 'gemini' else 'Ollama on Mac'})")
         print(f" Push-to-Talk Key: [{self.hotkey_name.upper()}] (Hold while speaking)")
         print(f" Log File: {LOG_PATH}")
         print(" System Tray Icon is active.")
