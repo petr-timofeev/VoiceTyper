@@ -62,7 +62,7 @@ LANGUAGE_MAP = {
 }
 
 TRANSLATE_PATTERN = re.compile(
-    r'^(?:переведи|перевод|translate)\s+(?:на|to|into)?\s*(?P<lang>[а-яa-z\-]+)(?:\s+(?:язык|language))?(?:[:,\-—\s]+)(?P<payload>.+)$',
+    r'^(?:переведи|перевод|перевести|translate)\s+(?:на|to|into|по-)?\s*(?P<lang>[а-яa-z\-]+)(?:\s+(?:язык|language))?(?:[:,\-—\s.]+)(?P<payload>.+)$',
     re.IGNORECASE | re.DOTALL
 )
 
