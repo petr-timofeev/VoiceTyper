@@ -90,7 +90,18 @@ def clean_transcribed_text(text: str) -> str:
     text = re.sub(r"\(.*?\)", "", text)
     text = re.sub(r"\s+", " ", text).strip()
 
-    # Check for exact repeated halves (e.g., "Sentence A. Sentence A.")
+    # 1. Hallucination check: low unique-word ratio (e.g. 50x "словенский")
+    words_clean = [w.lower().strip(",.!?;:—\"'()") for w in text.split() if w.strip(",.!?;:—\"'()")]
+    if len(words_clean) >= 6:
+        unique_ratio = len(set(words_clean)) / float(len(words_clean))
+        if unique_ratio < 0.30:
+            print(f"  [CLEAN] Dropped repetitive hallucination loop ({len(words_clean)} words, unique ratio {unique_ratio:.2f}): \"{text[:60]}...\"")
+            return ""
+
+    # 2. Collapse consecutive word loops (e.g. "словенский, словенский, словенский" -> "словенский")
+    text = re.sub(r'\b([\w\-]+)(?:[,\s]+\1\b){2,}', r'\1', text, flags=re.IGNORECASE)
+
+    # 3. Check for exact repeated halves (e.g., "Sentence A. Sentence A.")
     words = text.split()
     n = len(words)
     if n >= 4 and n % 2 == 0:
@@ -98,7 +109,7 @@ def clean_transcribed_text(text: str) -> str:
         if words[:half] == words[half:]:
             text = " ".join(words[:half])
 
-    # Deduplicate repeated sentences
+    # 4. Deduplicate repeated sentences
     parts = re.split(r'(?<=[.!?])\s+', text)
     if len(parts) >= 2:
         deduped = []
@@ -108,11 +119,11 @@ def clean_transcribed_text(text: str) -> str:
                 deduped.append(p.strip())
         text = " ".join(deduped).strip()
 
-    # Capitalize first letter if it is lowercase
+    # 5. Capitalize first letter if it is lowercase
     if len(text) > 0 and text[0].islower():
         text = text[0].upper() + text[1:]
 
-    # Ensure ending punctuation (. ? ! … : ; — -)
+    # 6. Ensure ending punctuation (. ? ! … : ; — -)
     if len(text) > 0 and not re.search(r"[.!?…:;,—\-]$", text):
         text += "."
 
@@ -321,42 +332,38 @@ def transcribe_via_gemini_audio(
         sf.write(wav_buf, audio_data, sample_rate, format="WAV", subtype="PCM_16")
         b64_audio = base64.b64encode(wav_buf.getvalue()).decode("utf-8")
 
+        is_dedicated_transcribe = "transcribe" in (model or "").lower()
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
         lang_str = "Russian" if language.lower().startswith("ru") else language
-        system_instruction = (
-            "You are an expert, verbatim Speech-to-Text (ASR) transcription engine. "
-            f"Transcribe spoken speech accurately in the spoken language (defaults to {lang_str} unless spoken otherwise). "
-            "Strictly preserve exact capitalization, all punctuation marks (commas, periods, question marks, dashes), numbers, and formatting. "
-            "Do NOT summarize, explain, translate, or answer the speech. "
-            "Output ONLY the verbatim transcription. If there is no speech or only silence/background noise, output nothing."
-        )
 
         user_text = "Transcribe this audio verbatim."
         if initial_prompt and initial_prompt.strip():
             user_text += f" Important vocabulary context: {initial_prompt.strip()}"
 
+        content_parts = [
+            {"inlineData": {"mimeType": "audio/wav", "data": b64_audio}}
+        ]
+        if not is_dedicated_transcribe:
+            content_parts.append({"text": user_text})
+
         payload = {
-            "contents": [{
-                "parts": [
-                    {
-                        "inlineData": {
-                            "mimeType": "audio/wav",
-                            "data": b64_audio
-                        }
-                    },
-                    {
-                        "text": user_text
-                    }
-                ]
-            }],
-            "systemInstruction": {
-                "parts": [{"text": system_instruction}]
-            },
+            "contents": [{"parts": content_parts}],
             "generationConfig": {
                 "temperature": 0.0,
                 "maxOutputTokens": 1024
             }
         }
+
+        if not is_dedicated_transcribe:
+            system_instruction = (
+                "You are an expert, verbatim Speech-to-Text (ASR) transcription engine. "
+                f"Transcribe spoken speech accurately in the spoken language (defaults to {lang_str} unless spoken otherwise). "
+                "Strictly preserve exact capitalization, all punctuation marks (commas, periods, question marks, dashes), numbers, and formatting. "
+                "Do NOT summarize, explain, translate, or answer the speech. "
+                "Output ONLY the verbatim transcription. If there is no speech or only silence/background noise, output nothing."
+            )
+            payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+
         t0 = time.time()
         resp = _SESSION.post(url, json=payload, timeout=15.0)
         calc_t = time.time() - t0
@@ -370,8 +377,18 @@ def transcribe_via_gemini_audio(
                     raw_text = parts[0].get("text", "").strip()
                     # Filter out model noise tokens like <noise>, <silence>, etc.
                     raw_text = re.sub(r"<[^>]+>", "", raw_text).strip()
-                    print(f"  [GEMINI CLOUD ASR]: {calc_t:.2f}s -> \"{raw_text}\"")
+                    print(f"  [GEMINI CLOUD ASR ({model})]: {calc_t:.2f}s -> \"{raw_text}\"")
                     return clean_transcribed_text(raw_text)
+        elif resp.status_code == 429 and is_dedicated_transcribe:
+            print(f"  [GEMINI ASR] Model '{model}' hit 25 RPD quota limit (429). Falling back to 'gemini-3.5-flash-lite'...")
+            return transcribe_via_gemini_audio(
+                audio_data=audio_data,
+                sample_rate=sample_rate,
+                api_key=api_key,
+                model="gemini-3.5-flash-lite",
+                initial_prompt=initial_prompt,
+                language=language
+            )
         else:
             print(f"[GEMINI ASR ERROR {resp.status_code}]: {resp.text[:200]}")
     except Exception as e:
@@ -395,13 +412,17 @@ def transcribe_batch(
     gemini_asr_model: str = "gemini-3.5-flash-lite",
     sample_rate: int = 16000
 ) -> str:
-    """Main transcription & translation pipeline entrypoint."""
-    if audio_data is None or len(audio_data) < 3200:  # < 0.2s
+    if audio_data is None or len(audio_data) < int(sample_rate * 0.25):  # < 0.25s
         return ""
 
     dur_sec = len(audio_data) / float(sample_rate)
+    rms = float(np.sqrt(np.mean(audio_data.astype(np.float32) ** 2)))
+    if rms < 0.0035:
+        print(f"\n[SPEECH] Audio is near-silent ({dur_sec:.2f}s, RMS: {rms:.5f} < 0.0035). Skipping transcription.")
+        return ""
+
     engine_mode = (asr_engine or "gemini").lower()
-    print(f"\n[SPEECH] Processing {dur_sec:.2f}s audio (Engine: {engine_mode.upper()})...")
+    print(f"\n[SPEECH] Processing {dur_sec:.2f}s audio (RMS: {rms:.4f}, Engine: {engine_mode.upper()})...")
 
     raw_text = None
 

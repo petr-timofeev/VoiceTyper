@@ -6,28 +6,35 @@ import time
 
 LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice_typer.log")
 
-# Safe stdout/stderr redirection for pythonw.exe (no console crash)
-if sys.stdout is None:
-    try:
-        sys.stdout = open(LOG_PATH, "a", encoding="utf-8", buffering=1)
-    except Exception:
-        pass
-elif hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+class TeeLogger:
+    def __init__(self, file_path, stream=None):
+        self.file = open(file_path, "a", encoding="utf-8", buffering=1)
+        self.stream = stream
 
-if sys.stderr is None:
-    try:
-        sys.stderr = open(LOG_PATH, "a", encoding="utf-8", buffering=1)
-    except Exception:
-        pass
-elif hasattr(sys.stderr, "reconfigure"):
-    try:
-        sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+    def write(self, data):
+        try:
+            self.file.write(data)
+        except Exception:
+            pass
+        if self.stream:
+            try:
+                self.stream.write(data)
+            except Exception:
+                pass
+
+    def flush(self):
+        try:
+            self.file.flush()
+        except Exception:
+            pass
+        if self.stream and hasattr(self.stream, "flush"):
+            try:
+                self.stream.flush()
+            except Exception:
+                pass
+
+sys.stdout = TeeLogger(LOG_PATH, sys.stdout)
+sys.stderr = TeeLogger(LOG_PATH, sys.stderr)
 
 import numpy as np
 from pynput import keyboard as pynput_keyboard
@@ -281,11 +288,27 @@ if __name__ == "__main__":
     mutex = acquire_single_instance_lock()
     if not mutex:
         print("[VOICE TYPER] Another instance of VoiceTyper is already running. Exiting.")
+        try:
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                "VoiceTyper уже запущен и работает в системном трее (возле часов на панели задач).\n\nНажмите клавишу F8 для записи голоса.",
+                "VoiceTyper уже запущен",
+                0x40 | 0x10000
+            )
+        except Exception:
+            pass
         sys.exit(0)
 
-    app = VoiceTyperApp()
     try:
+        app = VoiceTyperApp()
         app.start()
+    except Exception as e:
+        err_msg = f"Ошибка при запуске VoiceTyper:\n{e}\n\nПодробности записаны в voice_typer.log"
+        print(f"[ERROR] {err_msg}")
+        try:
+            ctypes.windll.user32.MessageBoxW(0, err_msg, "Ошибка VoiceTyper", 0x10 | 0x10000)
+        except Exception:
+            pass
     finally:
         if mutex:
             try:

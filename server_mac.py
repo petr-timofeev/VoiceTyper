@@ -69,6 +69,14 @@ def run_mlx_inference(
     initial_prompt: Optional[str] = None
 ) -> str:
     """Executes inference on Apple Metal GPU with optimized greedy decoding flags."""
+    if audio_np is None or len(audio_np) < 4000:
+        return ""
+
+    rms = float(np.sqrt(np.mean(audio_np.astype(np.float32) ** 2)))
+    if rms < 0.0035:
+        print(f"[INFERENCE SKIP] Audio is near-silent (RMS: {rms:.5f} < 0.0035). Skipping.")
+        return ""
+
     repo = MLX_MODELS.get(model_key.lower(), DEFAULT_MODEL_REPO)
 
     kwargs = {
@@ -78,7 +86,8 @@ def run_mlx_inference(
         "temperature": 0.0,
         "condition_on_previous_text": False,
         "word_timestamps": False,
-        "fp16": True
+        "fp16": True,
+        "no_speech_threshold": 0.6
     }
     if initial_prompt:
         kwargs["initial_prompt"] = initial_prompt
