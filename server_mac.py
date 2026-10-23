@@ -14,6 +14,7 @@ Ultra-low latency Whisper speech-to-text & local LLM translation server for Appl
 import io
 import json
 import os
+import re
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -62,6 +63,35 @@ class TranslationRequest(BaseModel):
     model: Optional[str] = None
 
 
+SERVER_HALLUCINATION_PATTERNS = [
+    re.compile(r'dimatorzok|дима\s*торзок', re.IGNORECASE),
+    re.compile(r'\b(?:субтитры\s+(?:создавал[а-яё]*|делал[а-яё]*|добавил[а-яё]*|подготовил[а-яё]*|перев[её]л[а-яё]*|редактировал[а-яё]*)|редактор\s+субтитров|перевод\s+субтитров|автор\s+субтитров)\b', re.IGNORECASE),
+    re.compile(r'^\s*субтитры(?:\s*[:\-\—].*)?[.!?\s]*$', re.IGNORECASE),
+    re.compile(r'\b(?:перевод\s+и\s+озвучк\w*|озвучено\s+по\s+версии|озвучка\s+студии)\b', re.IGNORECASE),
+    re.compile(r'^\s*(?:подписывайтесь на канал|ставьте лайки|спасибо за просмотр|спасибо за внимание|продолжение следует|всем пока|до новых встреч)[.!?\s]*$', re.IGNORECASE),
+]
+
+
+def is_server_audio_speech(audio_np: np.ndarray, sample_rate: int = 16000) -> bool:
+    """Fast energy-based VAD to prevent MLX Whisper running on clicks, silence, or noise."""
+    if audio_np is None or len(audio_np) < int(sample_rate * 0.35):
+        return False
+    frame_len = int(sample_rate * 0.03)
+    num_frames = len(audio_np) // frame_len
+    if num_frames == 0:
+        return False
+    frames = audio_np[:num_frames * frame_len].reshape((num_frames, frame_len))
+    frame_rms = np.sqrt(np.mean(frames ** 2, axis=1))
+    overall_rms = float(np.sqrt(np.mean(audio_np.astype(np.float32) ** 2)))
+    max_frame_rms = float(np.max(frame_rms))
+    speech_frames = int(np.sum(frame_rms > 0.030))
+    speech_dur = speech_frames * 0.03
+
+    if overall_rms < 0.008 or speech_dur < 0.15 or max_frame_rms < 0.035:
+        return False
+    return True
+
+
 def run_mlx_inference(
     audio_np: np.ndarray,
     model_key: str = "large-v3-turbo",
@@ -69,12 +99,8 @@ def run_mlx_inference(
     initial_prompt: Optional[str] = None
 ) -> str:
     """Executes inference on Apple Metal GPU with optimized greedy decoding flags."""
-    if audio_np is None or len(audio_np) < 4000:
-        return ""
-
-    rms = float(np.sqrt(np.mean(audio_np.astype(np.float32) ** 2)))
-    if rms < 0.0035:
-        print(f"[INFERENCE SKIP] Audio is near-silent (RMS: {rms:.5f} < 0.0035). Skipping.")
+    if not is_server_audio_speech(audio_np, sample_rate=16000):
+        print("[INFERENCE SKIP] Audio has no speech activity. Skipping.")
         return ""
 
     repo = MLX_MODELS.get(model_key.lower(), DEFAULT_MODEL_REPO)
@@ -93,7 +119,29 @@ def run_mlx_inference(
         kwargs["initial_prompt"] = initial_prompt
 
     result = mlx_whisper.transcribe(audio_np, **kwargs)
-    return result.get("text", "").strip()
+    text = result.get("text", "").strip()
+
+    # Clean known hallucinations (e.g. DimaTorzok on quiet audio)
+    for pat in SERVER_HALLUCINATION_PATTERNS:
+        if pat.search(text):
+            print(f"[SERVER MLX] Suppressed hallucination: \"{text}\"")
+            return ""
+
+    # Check prompt echo
+    if initial_prompt and text:
+        clean_text_norm = re.sub(r"[^\w\s]", "", text).lower().strip()
+        words = clean_text_norm.split()
+        if len(words) <= 3:
+            prompt_items = {
+                re.sub(r"[^\w\s]", "", item).lower().strip()
+                for item in re.split(r"[,;.]", initial_prompt)
+                if item.strip()
+            }
+            if clean_text_norm in prompt_items:
+                print(f"[SERVER MLX] Suppressed initial_prompt echo: \"{text}\"")
+                return ""
+
+    return text
 
 
 def run_local_translation(text: str, target_language: str = "Slovenian", model: str = OLLAMA_MODEL) -> str:

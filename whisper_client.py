@@ -3,12 +3,22 @@ import json
 import os
 import re
 import socket
+import sys
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import requests
 import soundfile as sf
+
+if sys.platform == "win32":
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # Global HTTP Keep-Alive connection pool
 _SESSION = requests.Session()
@@ -68,6 +78,17 @@ TRANSLATE_PATTERN = re.compile(
 )
 
 
+from audio_recorder import is_speech_present
+
+HALLUCINATION_PATTERNS = [
+    re.compile(r'dimatorzok|дима\s*торзок', re.IGNORECASE),
+    re.compile(r'\b(?:субтитры\s+(?:создавал[а-яё]*|делал[а-яё]*|добавил[а-яё]*|подготовил[а-яё]*|перев[её]л[а-яё]*|редактировал[а-яё]*)|редактор\s+субтитров|перевод\s+субтитров|автор\s+субтитров)\b', re.IGNORECASE),
+    re.compile(r'^\s*субтитры(?:\s*[:\-\—].*)?[.!?\s]*$', re.IGNORECASE),
+    re.compile(r'\b(?:перевод\s+и\s+озвучк\w*|озвучено\s+по\s+версии|озвучка\s+студии)\b', re.IGNORECASE),
+    re.compile(r'^\s*(?:подписывайтесь на канал|ставьте лайки|спасибо за просмотр|спасибо за внимание|продолжение следует|всем пока|до новых встреч)[.!?\s]*$', re.IGNORECASE),
+]
+
+
 def apply_custom_replacements(text: str, replacements: Optional[Dict[str, str]] = None) -> str:
     """Applies custom regex/word replacements to text (e.g. Slavic -> Slovenian)."""
     if not text or not replacements:
@@ -82,15 +103,38 @@ def apply_custom_replacements(text: str, replacements: Optional[Dict[str, str]] 
     return result
 
 
-def clean_transcribed_text(text: str) -> str:
-    """Cleans transcribed text from hallucinations, brackets, and Whisper repetition loops."""
+def clean_transcribed_text(text: str, initial_prompt: Optional[str] = None) -> str:
+    """Cleans transcribed text from hallucinations, prompt echoes, brackets, and Whisper repetition loops."""
     if not text:
         return ""
+
     text = re.sub(r"\[.*?\]", "", text)
     text = re.sub(r"\(.*?\)", "", text)
     text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return ""
 
-    # 1. Hallucination check: low unique-word ratio (e.g. 50x "словенский")
+    # 1. Check known Whisper hallucination patterns on silence/noise (e.g. DimaTorzok, subtitle credits)
+    for pat in HALLUCINATION_PATTERNS:
+        if pat.search(text):
+            print(f"  [CLEAN] Dropped Whisper hallucination: \"{text}\"")
+            return ""
+
+    # 2. Check if output is merely a prompt echo (Whisper hallucinating keywords from initial_prompt on silence)
+    if initial_prompt:
+        clean_text_norm = re.sub(r"[^\w\s]", "", text).lower().strip()
+        words = clean_text_norm.split()
+        if len(words) <= 3:
+            prompt_items = {
+                re.sub(r"[^\w\s]", "", item).lower().strip()
+                for item in re.split(r"[,;.]", initial_prompt)
+                if item.strip()
+            }
+            if clean_text_norm in prompt_items:
+                print(f"  [CLEAN] Dropped initial_prompt echo artifact: \"{text}\"")
+                return ""
+
+    # 3. Hallucination check: low unique-word ratio (e.g. 50x "словенский")
     words_clean = [w.lower().strip(",.!?;:—\"'()") for w in text.split() if w.strip(",.!?;:—\"'()")]
     if len(words_clean) >= 6:
         unique_ratio = len(set(words_clean)) / float(len(words_clean))
@@ -98,10 +142,10 @@ def clean_transcribed_text(text: str) -> str:
             print(f"  [CLEAN] Dropped repetitive hallucination loop ({len(words_clean)} words, unique ratio {unique_ratio:.2f}): \"{text[:60]}...\"")
             return ""
 
-    # 2. Collapse consecutive word loops (e.g. "словенский, словенский, словенский" -> "словенский")
+    # 4. Collapse consecutive word loops (e.g. "словенский, словенский, словенский" -> "словенский")
     text = re.sub(r'\b([\w\-]+)(?:[,\s]+\1\b){2,}', r'\1', text, flags=re.IGNORECASE)
 
-    # 3. Check for exact repeated halves (e.g., "Sentence A. Sentence A.")
+    # 5. Check for exact repeated halves (e.g., "Sentence A. Sentence A.")
     words = text.split()
     n = len(words)
     if n >= 4 and n % 2 == 0:
@@ -109,7 +153,7 @@ def clean_transcribed_text(text: str) -> str:
         if words[:half] == words[half:]:
             text = " ".join(words[:half])
 
-    # 4. Deduplicate repeated sentences
+    # 6. Deduplicate repeated sentences
     parts = re.split(r'(?<=[.!?])\s+', text)
     if len(parts) >= 2:
         deduped = []
@@ -119,11 +163,11 @@ def clean_transcribed_text(text: str) -> str:
                 deduped.append(p.strip())
         text = " ".join(deduped).strip()
 
-    # 5. Capitalize first letter if it is lowercase
+    # 7. Capitalize first letter if it is lowercase
     if len(text) > 0 and text[0].islower():
         text = text[0].upper() + text[1:]
 
-    # 6. Ensure ending punctuation (. ? ! … : ; — -)
+    # 8. Ensure ending punctuation (. ? ! … : ; — -)
     if len(text) > 0 and not re.search(r"[.!?…:;,—\-]$", text):
         text += "."
 
@@ -205,12 +249,21 @@ def translate_via_gemini(
                 parts = candidates[0].get("content", {}).get("parts", [])
                 if parts:
                     translated = parts[0].get("text", "").strip()
-                    print(f"  [GEMINI TRANSLATION ({target_language})]: {calc_t:.2f}s -> \"{translated}\"")
+                    try:
+                        print(f"  [GEMINI TRANSLATION ({target_language})]: {calc_t:.2f}s -> \"{translated}\"")
+                    except Exception:
+                        pass
                     return translated
         else:
-            print(f"[GEMINI TRANSLATE ERROR {resp.status_code}]: {resp.text[:200]}")
+            try:
+                print(f"[GEMINI TRANSLATE ERROR {resp.status_code}]: {resp.text[:200]}")
+            except Exception:
+                pass
     except Exception as e:
-        print(f"[GEMINI TRANSLATE ERROR]: {e}")
+        try:
+            print(f"[GEMINI TRANSLATE ERROR]: {e}")
+        except Exception:
+            pass
     return ""
 
 
@@ -268,7 +321,7 @@ def transcribe_via_http_raw(
             text = data.get("text", "").strip()
             calc_t = data.get("calc_time_sec", 0.0)
             print(f"  [GPU INFERENCE]: {calc_t:.3f}s")
-            return clean_transcribed_text(text)
+            return clean_transcribed_text(text, initial_prompt=initial_prompt)
     except Exception as e:
         print(f"[HTTP RAW ERROR]: {e}")
     return None
@@ -300,7 +353,7 @@ def transcribe_via_http_wav(
             text = data.get("text", "").strip()
             calc_t = data.get("calc_time_sec", 0.0)
             print(f"  [GPU INFERENCE WAV]: {calc_t:.3f}s")
-            return clean_transcribed_text(text)
+            return clean_transcribed_text(text, initial_prompt=initial_prompt)
     except Exception as e:
         print(f"[HTTP WAV ERROR]: {e}")
     return None
@@ -378,7 +431,7 @@ def transcribe_via_gemini_audio(
                     # Filter out model noise tokens like <noise>, <silence>, etc.
                     raw_text = re.sub(r"<[^>]+>", "", raw_text).strip()
                     print(f"  [GEMINI CLOUD ASR ({model})]: {calc_t:.2f}s -> \"{raw_text}\"")
-                    return clean_transcribed_text(raw_text)
+                    return clean_transcribed_text(raw_text, initial_prompt=initial_prompt)
         elif resp.status_code == 429 and is_dedicated_transcribe:
             print(f"  [GEMINI ASR] Model '{model}' hit 25 RPD quota limit (429). Falling back to 'gemini-3.5-flash-lite'...")
             return transcribe_via_gemini_audio(
@@ -412,15 +465,14 @@ def transcribe_batch(
     gemini_asr_model: str = "gemini-3.5-flash-lite",
     sample_rate: int = 16000
 ) -> str:
-    if audio_data is None or len(audio_data) < int(sample_rate * 0.25):  # < 0.25s
+    has_speech, reason = is_speech_present(audio_data, sample_rate)
+    if not has_speech:
+        dur_sec = (len(audio_data) / float(sample_rate)) if audio_data is not None else 0.0
+        print(f"\n[SPEECH] Skipping transcription ({dur_sec:.2f}s): {reason}")
         return ""
 
     dur_sec = len(audio_data) / float(sample_rate)
     rms = float(np.sqrt(np.mean(audio_data.astype(np.float32) ** 2)))
-    if rms < 0.0035:
-        print(f"\n[SPEECH] Audio is near-silent ({dur_sec:.2f}s, RMS: {rms:.5f} < 0.0035). Skipping transcription.")
-        return ""
-
     engine_mode = (asr_engine or "gemini").lower()
     print(f"\n[SPEECH] Processing {dur_sec:.2f}s audio (RMS: {rms:.4f}, Engine: {engine_mode.upper()})...")
 
@@ -463,8 +515,11 @@ def transcribe_batch(
     if not raw_text:
         return ""
 
-    # 3. Apply guaranteed custom word/regex replacements
+    # 3. Apply guaranteed custom word/regex replacements and re-clean
     processed_text = apply_custom_replacements(raw_text, custom_replacements)
+    processed_text = clean_transcribed_text(processed_text, initial_prompt=initial_prompt)
+    if not processed_text:
+        return ""
 
     # 4. Check for voice translation command ("Переведи на [язык]: ...")
     if translation_enabled:

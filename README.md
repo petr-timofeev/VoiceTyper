@@ -60,6 +60,11 @@ It offloads speech recognition to your idle Mac mini's Apple Silicon unified mem
   - Say *«Переведи на немецкий: добрый день, я скоро буду»* or *«Translate to Spanish: Thank you very much»* — VoiceTyper automatically translates the sentence via local LLM (Ollama Qwen2.5 on Mac) and pastes the translation directly!
 - **🔄 Guaranteed Custom Replacements (`custom_replacements`):**
   - Fix tricky phonetic homophones or domain-specific abbreviations with 100% regex-based precision.
+- **🛡️ Full Binary Clipboard Preservation:**
+  - Safely takes a raw Win32 snapshot of your existing clipboard (including screenshots, images, files, HTML, and text) and restores it immediately after pasting. Never lose a copied screenshot or code snippet when dictating!
+- **🔇 Smart Acoustic VAD & Anti-Hallucination Filter:**
+  - Fast energy-based Voice Activity Detection filters out key clicks, accidental taps (<0.35s), and 1–2s silence/pauses without wasting compute.
+  - Automatically suppresses known Whisper hallucination artifacts (subtitle credits like DimaTorzok, channel promo phrases, and prompt echoes).
 - **🎯 Custom Vocabulary Biasing (`initial_prompt`):** Guide Whisper toward specialized names, regional terminology, and technical jargon.
 - **🖥️ Silent Windows Background Mode & System Tray:** Discreet tray icon with automatic live heartbeat polling (Ready, Recording, Processing, Offline).
 

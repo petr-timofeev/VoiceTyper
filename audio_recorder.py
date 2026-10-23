@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 import wave
 import numpy as np
 import sounddevice as sd
@@ -30,14 +30,53 @@ def find_microphone_device(keyword: str = "") -> Optional[int]:
     return None
 
 
+def is_speech_present(audio_data: np.ndarray, sample_rate: int = 16000) -> Tuple[bool, str]:
+    """
+    Robust lightweight energy-based Voice Activity Detection (VAD).
+    Filters out silence, ambient room noise, key clicks, and accidental short taps
+    to prevent Whisper hallucinating subtitle credits or prompt echoes.
+    """
+    if audio_data is None or len(audio_data) == 0:
+        return False, "Audio is empty"
+
+    dur_sec = len(audio_data) / float(sample_rate)
+    if dur_sec < 0.35:
+        return False, f"Audio too short ({dur_sec:.2f}s < 0.35s)"
+
+    frame_len = int(sample_rate * 0.03)  # 30ms window
+    num_frames = len(audio_data) // frame_len
+    if num_frames == 0:
+        return False, "Audio has no frames"
+
+    frames = audio_data[:num_frames * frame_len].reshape((num_frames, frame_len))
+    frame_rms = np.sqrt(np.mean(frames ** 2, axis=1))
+    overall_rms = float(np.sqrt(np.mean(audio_data.astype(np.float32) ** 2)))
+    max_frame_rms = float(np.max(frame_rms))
+
+    speech_frames = int(np.sum(frame_rms > 0.030))
+    speech_dur = speech_frames * 0.03
+
+    if overall_rms < 0.008:
+        return False, f"Near-silent audio (RMS {overall_rms:.4f} < 0.008)"
+
+    if speech_dur < 0.15:
+        return False, f"No vocal activity detected (active duration {speech_dur:.2f}s < 0.15s, max frame {max_frame_rms:.4f})"
+
+    if max_frame_rms < 0.035:
+        return False, f"Peak vocal energy too low ({max_frame_rms:.4f} < 0.035)"
+
+    return True, f"Speech detected (dur={dur_sec:.2f}s, active={speech_dur:.2f}s, RMS={overall_rms:.4f})"
+
+
 def normalize_audio(audio_data: np.ndarray, target_peak: float = 0.90) -> np.ndarray:
     """Normalizes audio volume to optimal level for Whisper inference."""
     if audio_data is None or len(audio_data) == 0:
         return audio_data
 
     max_val = float(np.max(np.abs(audio_data)))
-    if max_val > 1e-4:
-        gain = min(target_peak / max_val, 25.0)
+    # Only normalize if there is real acoustic energy above room noise floor
+    if max_val > 0.015:
+        gain = min(target_peak / max_val, 15.0)
         return np.clip(audio_data * gain, -1.0, 1.0)
     return audio_data
 

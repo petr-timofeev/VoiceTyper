@@ -39,7 +39,7 @@ sys.stderr = TeeLogger(LOG_PATH, sys.stderr)
 import numpy as np
 from pynput import keyboard as pynput_keyboard
 
-from audio_recorder import AudioRecorder, LAST_RECORDING_PATH
+from audio_recorder import AudioRecorder, LAST_RECORDING_PATH, is_speech_present
 from config import load_config, save_config
 from text_inserter import insert_text
 from tray_app import TrayApp
@@ -171,8 +171,10 @@ class VoiceTyperApp:
         self.tray.set_state("processing")
 
         audio_data = self.audio.stop(post_roll_sec=0.15)
-        if audio_data is None or len(audio_data) < int(self.sample_rate * 0.2):
-            print("[INFO] Audio too short (< 0.2s). Skipping.")
+        has_speech, reason = is_speech_present(audio_data, self.sample_rate)
+        if not has_speech:
+            dur = (len(audio_data) / self.sample_rate) if audio_data is not None else 0.0
+            print(f"[INFO] Skipping audio ({dur:.2f}s): {reason}")
             self.tray.set_state("ready")
             with self._lock:
                 self.is_processing = False
